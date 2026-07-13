@@ -1,7 +1,12 @@
 {
     "name": "FuryPlusPlus.Editor",
     "rootNamespace": "FuryPlusPlus",
-    "references": [],
+    "references": [
+        "VRC.SDKBase",
+        "VRC.SDKBase.Editor",
+        "VRC.SDKBase.Editor.BuildPipeline",
+        "VRC.SDK3A"
+    ],
     "includePlatforms": [
         "Editor"
     ],
@@ -9,7 +14,10 @@
     "allowUnsafeCode": false,
     "overrideReferences": true,
     "precompiledReferences": [
-        "0Harmony.dll"
+        "0Harmony.dll",
+        "VRCSDKBase.dll",
+        "VRCSDK3A.dll",
+        "VRCSDKBase-Editor.dll"
     ],
     "autoReferenced": true,
     "defineConstraints": [],

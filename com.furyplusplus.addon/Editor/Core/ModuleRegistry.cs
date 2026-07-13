@@ -45,6 +45,8 @@ namespace FuryPlusPlus {
             // --- New FuryPlusPlus speed modules ---
             new PlayModeSkipsModule(),
             new ProgressWindowThemeModule(),
+            // --- Quality passes (post-build hook order) ---
+            new StripUnusedParamsModule(),
         };
 
         private static readonly Dictionary<string, (ModuleState State, string Message)> Statuses =
