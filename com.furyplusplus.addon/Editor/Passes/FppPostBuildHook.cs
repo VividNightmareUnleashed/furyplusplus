@@ -34,13 +34,30 @@ namespace FuryPlusPlus {
                 };
             }
 
-            var ok = true;
-            var strip = StripUnusedParamsModule.Instance;
-            if (strip != null && ModuleRegistry.IsActive(strip) && strip.Enabled) {
-                ok &= StripUnusedParamsPass.Run(descriptor);
+            // Never touch a user asset: post-build the descriptor must reference VRCFury's
+            // generated params copy. Anything else is an unexpected pipeline state.
+            var paramsAsset = descriptor.expressionParameters;
+            var assetPath = paramsAsset == null ? null : AssetDatabase.GetAssetPath(paramsAsset);
+            if (string.IsNullOrEmpty(assetPath) || !assetPath.StartsWith("Packages/com.vrcfury.temp")) {
+                Log.Warn("Post-build parameter passes skipped: expression parameters are not a " +
+                         "VRCFury-generated asset (" +
+                         (string.IsNullOrEmpty(assetPath) ? "unsaved" : assetPath) + ").");
+                return true;
             }
-            // Int→Bool narrowing joins here later, after the strip pass has soaked.
-            return ok;
+
+            var index = ParamUsageIndex.Build(descriptor);
+
+            var strip = StripUnusedParamsModule.Instance;
+            var stripped = strip != null && ModuleRegistry.IsActive(strip) && strip.Enabled
+                ? StripUnusedParamsPass.Run(descriptor, index)
+                : new List<string>();
+
+            var narrow = NarrowIntParamsModule.Instance;
+            var narrowed = narrow != null && ModuleRegistry.IsActive(narrow) && narrow.Enabled
+                ? NarrowIntParamsPass.Run(descriptor, index)
+                : new List<string>();
+
+            return StripUnusedParamsPass.HandleCrossPlatform(descriptor, stripped, narrowed);
         }
     }
 }

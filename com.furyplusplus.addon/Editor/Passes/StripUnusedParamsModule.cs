@@ -79,26 +79,15 @@ namespace FuryPlusPlus {
             return vrcfuryTestType != null && avatarObject.GetComponent(vrcfuryTestType) != null;
         }
 
-        /** Returns false to hard-fail the build (cross-platform divergence only). */
-        internal static bool Run(VRCAvatarDescriptor descriptor) {
+        /** Returns the stripped parameter names (the hook handles the cross-platform gate). */
+        internal static List<string> Run(VRCAvatarDescriptor descriptor, ParamUsageIndex index) {
+            var stripped = new List<string>();
             var paramsAsset = descriptor.expressionParameters;
-            if (paramsAsset == null || paramsAsset.parameters == null) return true;
-
-            // Never touch a user asset: post-build the descriptor must reference VRCFury's
-            // generated copy. Anything else means an unexpected pipeline state — do nothing.
-            var assetPath = AssetDatabase.GetAssetPath(paramsAsset);
-            if (string.IsNullOrEmpty(assetPath) || !assetPath.StartsWith("Packages/com.vrcfury.temp")) {
-                Log.Warn("Strip unused params skipped: expression parameters are not a " +
-                         "VRCFury-generated asset (" + (string.IsNullOrEmpty(assetPath) ? "unsaved" : assetPath) + ").");
-                return true;
-            }
+            if (paramsAsset == null || paramsAsset.parameters == null) return stripped;
 
             var module = StripUnusedParamsModule.Instance;
             var keepDynamics = Settings.IsOptionEnabled(module, StripUnusedParamsModule.KeepDynamicsParams);
             var keepGlobs = ParseKeepList(EditorPrefs.GetString(StripUnusedParamsModule.KeepListKey, ""));
-
-            var index = ParamUsageIndex.Build(descriptor);
-            var stripped = new List<string>();
             var keptDynamics = 0;
             var bits = 0;
 
@@ -126,10 +115,18 @@ namespace FuryPlusPlus {
                 ? null
                 : $"stripped={stripped.Count} bits={bits}" + (keptDynamics > 0 ? $" keptDynamics={keptDynamics}" : "");
 
-            return HandleCrossPlatform(descriptor, stripped);
+            return stripped;
         }
 
-        private static bool HandleCrossPlatform(VRCAvatarDescriptor descriptor, List<string> stripped) {
+        /**
+         * The combined cross-platform gate for all parameter-mutating passes; called once
+         * by the post-build hook. Returns false to hard-fail a diverging mobile build.
+         */
+        internal static bool HandleCrossPlatform(
+            VRCAvatarDescriptor descriptor,
+            List<string> stripped,
+            List<string> narrowed
+        ) {
             var blueprintId = GetBlueprintId(descriptor);
             var target = EditorUserBuildSettings.activeBuildTarget;
             var isMobile = target == BuildTarget.Android || target == BuildTarget.iOS;
@@ -137,7 +134,7 @@ namespace FuryPlusPlus {
             if (isMobile) {
                 // Only relevant while VRCFury's own mobile parameter alignment is active.
                 if (!EditorPrefs.GetBool("com.vrcfury.alignMobile", true)) return true;
-                if (!FppSidecar.VerifyMobileDecision(blueprintId, stripped, out var error)) {
+                if (!FppSidecar.VerifyMobileDecision(blueprintId, stripped, out var error, narrowed)) {
                     Log.Error(error);
                     return false;
                 }
@@ -150,7 +147,7 @@ namespace FuryPlusPlus {
             } catch {
                 uploading = false;
             }
-            if (uploading) FppSidecar.SaveDesktopDecision(blueprintId, stripped);
+            if (uploading) FppSidecar.SaveDesktopDecision(blueprintId, stripped, narrowed);
             return true;
         }
 

@@ -17,6 +17,7 @@ namespace FuryPlusPlus {
             public string addonVersion;
             public int algorithmVersion;
             public List<string> strippedParams = new List<string>();
+            public List<string> narrowedParams = new List<string>();
         }
 
         internal const int AlgorithmVersion = 1;
@@ -29,14 +30,20 @@ namespace FuryPlusPlus {
             return Path.Combine(DirPath, blueprintId + ".json");
         }
 
-        internal static void SaveDesktopDecision(string blueprintId, IEnumerable<string> strippedParams) {
+        internal static void SaveDesktopDecision(
+            string blueprintId,
+            IEnumerable<string> strippedParams,
+            IEnumerable<string> narrowedParams = null
+        ) {
             if (string.IsNullOrEmpty(blueprintId)) return;
             try {
                 Directory.CreateDirectory(DirPath);
                 var data = new SavedData {
                     addonVersion = "0.1.0",
                     algorithmVersion = AlgorithmVersion,
-                    strippedParams = strippedParams.OrderBy(name => name, StringComparer.Ordinal).ToList()
+                    strippedParams = strippedParams.OrderBy(name => name, StringComparer.Ordinal).ToList(),
+                    narrowedParams = (narrowedParams ?? Enumerable.Empty<string>())
+                        .OrderBy(name => name, StringComparer.Ordinal).ToList()
                 };
                 File.WriteAllText(FileFor(blueprintId), JsonUtility.ToJson(data, true));
             } catch (Exception e) {
@@ -51,7 +58,8 @@ namespace FuryPlusPlus {
         internal static bool VerifyMobileDecision(
             string blueprintId,
             IEnumerable<string> strippedParams,
-            out string error
+            out string error,
+            IEnumerable<string> narrowedParams = null
         ) {
             error = null;
             if (string.IsNullOrEmpty(blueprintId)) return true;
@@ -74,18 +82,32 @@ namespace FuryPlusPlus {
                 return false;
             }
 
-            var mobile = strippedParams.OrderBy(name => name, StringComparer.Ordinal).ToList();
-            if (!mobile.SequenceEqual(saved.strippedParams)) {
-                var desktopOnly = saved.strippedParams.Except(mobile).ToList();
-                var mobileOnly = mobile.Except(saved.strippedParams).ToList();
-                error = "FuryPlusPlus parameter decisions differ between the desktop upload and " +
-                        "this mobile build — uploading would desync the two platforms. " +
-                        (desktopOnly.Count > 0 ? $"Desktop-only: {string.Join(", ", desktopOnly)}. " : "") +
-                        (mobileOnly.Count > 0 ? $"Mobile-only: {string.Join(", ", mobileOnly)}. " : "") +
-                        "Re-upload the desktop version first (same FuryPlusPlus settings on both).";
+            if (!SetsMatch(saved.strippedParams, strippedParams, "un-synced", out error)) return false;
+            if (!SetsMatch(saved.narrowedParams, narrowedParams ?? Enumerable.Empty<string>(),
+                    "narrowed", out error)) {
                 return false;
             }
             return true;
+        }
+
+        private static bool SetsMatch(
+            List<string> desktop,
+            IEnumerable<string> mobileSource,
+            string what,
+            out string error
+        ) {
+            error = null;
+            var mobile = mobileSource.OrderBy(name => name, StringComparer.Ordinal).ToList();
+            desktop = desktop ?? new List<string>();
+            if (mobile.SequenceEqual(desktop)) return true;
+            var desktopOnly = desktop.Except(mobile).ToList();
+            var mobileOnly = mobile.Except(desktop).ToList();
+            error = $"FuryPlusPlus {what}-parameter decisions differ between the desktop upload " +
+                    "and this mobile build — uploading would desync the two platforms. " +
+                    (desktopOnly.Count > 0 ? $"Desktop-only: {string.Join(", ", desktopOnly)}. " : "") +
+                    (mobileOnly.Count > 0 ? $"Mobile-only: {string.Join(", ", mobileOnly)}. " : "") +
+                    "Re-upload the desktop version first (same FuryPlusPlus settings on both).";
+            return false;
         }
     }
 }

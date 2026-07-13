@@ -59,6 +59,7 @@ namespace FuryPlusPlus {
             new OffSideEliminationModule(),
             new DbtConsolidationModule(),
             new BlendshapeAutoEnableModule(),
+            new NarrowIntParamsModule(),
         };
 
         private static readonly Dictionary<string, (ModuleState State, string Message)> Statuses =
