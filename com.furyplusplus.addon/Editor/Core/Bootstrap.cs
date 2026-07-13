@@ -51,6 +51,14 @@ namespace FuryPlusPlus {
                 Log.Warn("Build phase hooks unavailable (dependent modules will fail closed): " + e.Message);
             }
             ModuleRegistry.InstallAll(Harmony, compat);
+
+            // First install (or major update): open the FuryPlusPlus window once.
+            const string welcomeVersion = "0.1.0";
+            if (Settings.MasterEnabled
+                && EditorPrefs.GetString(Settings.WelcomeShownVersionKey, "") != welcomeVersion) {
+                EditorPrefs.SetString(Settings.WelcomeShownVersionKey, welcomeVersion);
+                EditorApplication.delayCall += SettingsWindow.Open;
+            }
         }
 
         private static void Unpatch() {

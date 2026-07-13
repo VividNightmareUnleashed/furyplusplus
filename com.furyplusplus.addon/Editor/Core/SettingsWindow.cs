@@ -25,10 +25,12 @@ namespace FuryPlusPlus {
         };
 
         private Vector2 scroll;
+        private VRC.SDK3.Avatars.Components.VRCAvatarDescriptor estimateTarget;
+        private Estimators.Result? estimate;
 
         internal static void Open() {
             var window = GetWindow<SettingsWindow>(utility: false, title: "FuryPlusPlus", focus: true);
-            window.minSize = new Vector2(420, 320);
+            window.minSize = new Vector2(440, 380);
             window.Show();
         }
 
@@ -36,6 +38,8 @@ namespace FuryPlusPlus {
             scroll = EditorGUILayout.BeginScrollView(scroll);
             EditorGUILayout.Space();
             DrawStatusBanner();
+            EditorGUILayout.Space();
+            DrawEstimator();
             EditorGUILayout.Space();
 
             var master = EditorGUILayout.ToggleLeft(
@@ -101,6 +105,37 @@ namespace FuryPlusPlus {
             }
 
             EditorGUILayout.EndScrollView();
+        }
+
+        private void DrawEstimator() {
+            EditorGUILayout.LabelField("Estimated savings", EditorStyles.boldLabel);
+            using (new EditorGUILayout.HorizontalScope()) {
+                estimateTarget = (VRC.SDK3.Avatars.Components.VRCAvatarDescriptor)EditorGUILayout.ObjectField(
+                    estimateTarget, typeof(VRC.SDK3.Avatars.Components.VRCAvatarDescriptor), true);
+                using (new EditorGUI.DisabledScope(estimateTarget == null)) {
+                    if (GUILayout.Button("Analyze", GUILayout.Width(80))) {
+                        estimate = Estimators.Analyze(estimateTarget);
+                    }
+                }
+            }
+            if (estimate.HasValue) {
+                var result = estimate.Value;
+                string Fmt(int value, string text) => value < 0 ? "n/a" : string.Format(text, value);
+                EditorGUILayout.HelpBox(
+                    $"Synced parameter bits: {Fmt(result.SyncedBits, "{0}")} / {result.MaxBits}\n" +
+                    $"Un-syncable unused parameters: {Fmt(result.StrippableParams, "{0}")}" +
+                    (result.StrippableBits > 0 ? $" (~{result.StrippableBits} bits)" : "") + "\n" +
+                    $"Ints narrowable to Bool: {Fmt(result.NarrowableInts, "{0}")}" +
+                    (result.NarrowableInts > 0 ? $" (~{result.NarrowableInts * 7} bits)" : "") + "\n" +
+                    $"FX layers (pre-bake): {Fmt(result.FxLayers, "{0}")}\n" +
+                    $"Non-animated blendshapes: {Fmt(result.NonAnimatedBlendshapes, "{0}")}" +
+                    (result.BlendshapeMeshes > 0 ? $" across {result.BlendshapeMeshes} mesh(es)" : "") +
+                    "\n\nProjections against the un-baked avatar — the baked result differs " +
+                    "(VRCFury adds parameters/layers). Speed savings are measured per bake; " +
+                    "see the profiler report after your next build.",
+                    MessageType.None
+                );
+            }
         }
 
         private static void DrawStatusBanner() {

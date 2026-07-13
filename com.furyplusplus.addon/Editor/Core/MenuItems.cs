@@ -9,6 +9,11 @@ namespace FuryPlusPlus {
             SettingsWindow.Open();
         }
 
+        [MenuItem(Root + "Welcome", priority = 1)]
+        private static void OpenWelcome() {
+            SettingsWindow.Open();
+        }
+
         [MenuItem(Root + "Log last profile report", priority = 20)]
         private static void LogLastReport() {
             var report = FuryPlusPlusProfilerApi.LastReport;
