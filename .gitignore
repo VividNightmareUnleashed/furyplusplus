@@ -1,0 +1,13 @@
+# Local VRCFury source clone, kept beside the addon for study/reference only.
+# It is not part of this repository and has its own license.
+/vrcfury/
+
+# Built packages are published as releases, not committed.
+*.unitypackage
+
+# IDE / OS
+.vs/
+.idea/
+*.user
+Thumbs.db
+.DS_Store

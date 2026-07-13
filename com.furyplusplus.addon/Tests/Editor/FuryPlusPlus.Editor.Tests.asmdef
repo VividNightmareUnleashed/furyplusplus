@@ -1,0 +1,23 @@
+{
+    "name": "FuryPlusPlus.Editor.Tests",
+    "rootNamespace": "FuryPlusPlus.Tests",
+    "references": [
+        "FuryPlusPlus.Editor"
+    ],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
