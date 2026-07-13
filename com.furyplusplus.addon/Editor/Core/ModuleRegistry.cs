@@ -53,6 +53,7 @@ namespace FuryPlusPlus {
             new NoOpCurveStripModule(),
             new ClipDedupModule(),
             new OffSideEliminationModule(),
+            new DbtConsolidationModule(),
         };
 
         private static readonly Dictionary<string, (ModuleState State, string Message)> Statuses =
