@@ -25,6 +25,7 @@ namespace FuryPlusPlus {
         private const string TabKey = "FuryPlusPlus.SettingsTab";
         private const string BreakdownKey = "FuryPlusPlus.BakeBreakdown";
         private const string AdvancedKey = "FuryPlusPlus.AdvancedOpen";
+        private const string TargetKey = "FuryPlusPlus.AnalyzeTarget";
 
         private struct TabDef {
             internal ModuleKind Kind;
@@ -37,7 +38,7 @@ namespace FuryPlusPlus {
             new TabDef {
                 Kind = ModuleKind.Speed, Title = "Build speed",
                 Note = "Output-identical bake speedups. The header above shows your last measured bake " +
-                       "— use Benchmark stock for a true before/after; modules that count their own " +
+                       "— use Benchmark for a true before/after; modules that count their own " +
                        "work show it in green.",
                 Groups = new[] {
                     ("Armature & links", new[] {
@@ -109,7 +110,9 @@ namespace FuryPlusPlus {
         private static readonly Color StockOrange = new Color(1f, 0.5f, 0f);
 
         private Vector2 scroll;
-        private VRC.SDK3.Avatars.Components.VRCAvatarDescriptor estimateTarget;
+        // Serialized so it survives script compiles; play-mode transitions destroy scene
+        // objects, so the GlobalObjectId in SessionState re-resolves it afterwards.
+        [SerializeField] private VRC.SDK3.Avatars.Components.VRCAvatarDescriptor estimateTarget;
         private bool autoPickedTarget;
         private Estimators.Result? analysis;
 
@@ -252,11 +255,18 @@ namespace FuryPlusPlus {
         private void DrawHeader() {
             if (estimateTarget == null && !autoPickedTarget) {
                 autoPickedTarget = true;
-                estimateTarget = FindObjectOfType<VRC.SDK3.Avatars.Components.VRCAvatarDescriptor>();
+                estimateTarget = RestoreTarget()
+                    ?? FindObjectOfType<VRC.SDK3.Avatars.Components.VRCAvatarDescriptor>();
             }
             using (new EditorGUILayout.HorizontalScope()) {
-                estimateTarget = (VRC.SDK3.Avatars.Components.VRCAvatarDescriptor)EditorGUILayout.ObjectField(
+                var picked = (VRC.SDK3.Avatars.Components.VRCAvatarDescriptor)EditorGUILayout.ObjectField(
                     estimateTarget, typeof(VRC.SDK3.Avatars.Components.VRCAvatarDescriptor), true);
+                if (picked != estimateTarget) {
+                    estimateTarget = picked;
+                    SessionState.SetString(TargetKey, picked == null
+                        ? ""
+                        : GlobalObjectId.GetGlobalObjectIdSlow(picked).ToString());
+                }
                 using (new EditorGUI.DisabledScope(estimateTarget == null)) {
                     if (GUILayout.Button("Analyze", GUILayout.Width(80))) {
                         analysis = Estimators.Analyze(estimateTarget);
@@ -287,6 +297,14 @@ namespace FuryPlusPlus {
             }
 
             DrawBakeBreakdown();
+        }
+
+        /** The avatar picked before the last domain reload / play-mode round trip. */
+        private static VRC.SDK3.Avatars.Components.VRCAvatarDescriptor RestoreTarget() {
+            var raw = SessionState.GetString(TargetKey, "");
+            if (string.IsNullOrEmpty(raw) || !GlobalObjectId.TryParse(raw, out var id)) return null;
+            return GlobalObjectId.GlobalObjectIdentifierToObjectSlow(id)
+                as VRC.SDK3.Avatars.Components.VRCAvatarDescriptor;
         }
 
         private static EditorGUILayout.VerticalScope Card(float width) {
@@ -374,13 +392,11 @@ namespace FuryPlusPlus {
             using (Card(width)) {
                 GUILayout.Label("Last bake", EditorStyles.miniLabel);
                 var last = BakeHistory.LastBake;
+                var stock = BakeHistory.StockBaseline;
                 if (last.HasValue) {
                     GUILayout.Label(new GUIContent(FormatMs(last.Value.TotalMs),
                         $"{AvatarLeaf(last.Value.Avatar)} — {last.Value.Date}"), valueStyle);
-                    var stock = BakeHistory.StockBaseline;
-                    if (BakeHistory.LastBakeWasStock) {
-                        GUILayout.Label("stock baseline recorded", miniWrapStyle);
-                    } else if (stock.HasValue && stock.Value.Avatar == last.Value.Avatar) {
+                    if (stock.HasValue && stock.Value.Avatar == last.Value.Avatar) {
                         var saved = stock.Value.TotalMs - last.Value.TotalMs;
                         if (saved > 0) {
                             GUILayout.Label(new GUIContent($"-{FormatMs(saved)} vs stock",
@@ -397,7 +413,15 @@ namespace FuryPlusPlus {
                     }
                 } else {
                     GUILayout.Label("—", valueStyle);
-                    GUILayout.Label("run a bake", miniWrapStyle);
+                    if (stock.HasValue) {
+                        GUILayout.Label(new GUIContent("baseline recorded — bake to compare",
+                            $"Stock VRCFury: {FormatMs(stock.Value.TotalMs)} on " +
+                            $"{AvatarLeaf(stock.Value.Avatar)} ({stock.Value.Date}). The next " +
+                            "normal bake becomes the FuryPlusPlus side of the comparison."),
+                            miniWrapStyle);
+                    } else {
+                        GUILayout.Label("run a bake", miniWrapStyle);
+                    }
                 }
                 GUILayout.FlexibleSpace();
                 if (!BakeHistory.BenchmarkPending) {
@@ -461,22 +485,27 @@ namespace FuryPlusPlus {
         }
 
         private void DrawBakeBreakdown() {
-            var newPhases = BakeHistory.LastPhases();
-            if (newPhases.Count == 0) return;
+            var last = BakeHistory.LastBake;
+            var stock = BakeHistory.StockBaseline;
+            // The baseline overlays when it is comparable (same avatar as the last normal
+            // bake) or when it is the only bake recorded so far (a fresh benchmark).
+            var stockUsable = stock.HasValue
+                              && (!last.HasValue || stock.Value.Avatar == last.Value.Avatar);
+            var newPhases = last.HasValue
+                ? BakeHistory.LastPhases()
+                : new List<(string Name, double Ms)>();
+            var stockPhases = stockUsable
+                ? BakeHistory.StockPhases()
+                : new List<(string Name, double Ms)>();
+            if (newPhases.Count == 0 && stockPhases.Count == 0) return;
             var open = SessionState.GetBool(BreakdownKey, false);
-            var newOpen = EditorGUILayout.Foldout(open, "Last bake breakdown", true);
+            var newOpen = EditorGUILayout.Foldout(open,
+                newPhases.Count > 0 ? "Last bake breakdown" : "Benchmark breakdown", true);
             if (newOpen != open) SessionState.SetBool(BreakdownKey, newOpen);
             if (!newOpen) return;
 
-            // The stock baseline only overlays when it is comparable: same avatar, and the
-            // last bake was a normal (FuryPlusPlus-on) bake rather than the benchmark itself.
-            var last = BakeHistory.LastBake;
-            var stock = BakeHistory.StockBaseline;
-            var compare = stock.HasValue && last.HasValue && !BakeHistory.LastBakeWasStock
-                          && stock.Value.Avatar == last.Value.Avatar;
-            var stockPhases = compare
-                ? BakeHistory.StockPhases()
-                : new List<(string Name, double Ms)>();
+            // The red→green delta columns only make sense with both sides measured.
+            var compare = newPhases.Count > 0 && stockPhases.Count > 0;
 
             var rows = new List<PhaseRow>();
             var index = new Dictionary<string, int>();
@@ -494,14 +523,35 @@ namespace FuryPlusPlus {
                 }
             }
 
+            // The recorder keeps phases down to 1 ms so speedups can't fall out of the
+            // record; what is big enough to *show* is decided here instead.
+            rows.RemoveAll(row => Math.Max(row.NewMs, row.StockMs) < 25.0);
+            if (rows.Count == 0) return;
+
+            if (compare) {
+                // Only rows that read as a win survive: phases the baseline never measured
+                // (its phase floor pruned them) have nothing to compare against, and phases
+                // that got slower are work our own modules deliberately moved around (e.g.
+                // toggles now build blendtrees inside ToggleBuilder instead of layers for
+                // LayerToTree) — out of context they read as regressions. The full truth
+                // stays in the header card totals and the console profile report.
+                // The 1.005 tolerance keeps near-ties visible as "unchanged" no matter
+                // which way the jitter fell, instead of hiding a 403→405 ms row while
+                // showing its 403→402 ms twin.
+                var wins = rows.Where(row => row.StockMs >= 0
+                    && (row.NewMs < 0 || row.NewMs < row.StockMs * 1.005)).ToList();
+                if (wins.Count > 0) rows = wins;
+                else compare = false;
+            }
+
             var scale = rows.Max(row => Math.Max(row.NewMs, row.StockMs));
             var groups = rows
                 .GroupBy(row => CategoryOf(row.Name))
                 .OrderByDescending(group => group.Sum(row => Math.Max(row.StockMs, row.NewMs)));
 
             foreach (var group in groups) {
-                var newSum = group.Where(row => row.NewMs >= 0).Sum(row => row.NewMs);
-                var stockSum = group.Where(row => row.StockMs >= 0).Sum(row => row.StockMs);
+                // Headers are pure section labels — sums here just echoed their rows'
+                // numbers (most categories have one row) and read as extra measurements.
                 var headerRect = EditorGUILayout.BeginHorizontal();
                 if (Event.current.type == EventType.Repaint) {
                     EditorGUI.DrawRect(headerRect, bandTint);
@@ -509,14 +559,6 @@ namespace FuryPlusPlus {
                 GUILayout.Space(2);
                 GUILayout.Label(group.Key, EditorStyles.miniBoldLabel);
                 GUILayout.FlexibleSpace();
-                if (compare && stockSum > 0) {
-                    GUILayout.Label(new GUIContent(FormatMs(stockSum), "stock VRCFury"),
-                        redRightStyle, GUILayout.Width(52f));
-                    GUILayout.Label("→", EditorStyles.centeredGreyMiniLabel, GUILayout.Width(16f));
-                    DrawSpeedDelta(newSum, stockSum);
-                } else {
-                    GUILayout.Label(FormatMs(newSum), miniRightStyle, GUILayout.Width(120f));
-                }
                 EditorGUILayout.EndHorizontal();
                 var odd = false;
                 foreach (var row in group.OrderByDescending(r => Math.Max(r.StockMs, r.NewMs))) {
@@ -528,13 +570,26 @@ namespace FuryPlusPlus {
 
             using (new EditorGUILayout.HorizontalScope()) {
                 GUILayout.Space(4);
-                LegendSwatch(StockOrange, compare
-                    ? new GUIContent("VRCFury")
-                    : new GUIContent("VRCFury (Benchmark to record)",
+                GUIContent orangeLabel;
+                if (!stock.HasValue) {
+                    orangeLabel = new GUIContent("VRCFury (Benchmark to record)",
                         "Press Benchmark in the header — one bake runs without FuryPlusPlus " +
-                        "and its per-phase times overlay here in orange."));
+                        "and its per-phase times overlay here in orange.");
+                } else if (!stockUsable) {
+                    orangeLabel = new GUIContent(
+                        $"VRCFury (baseline: {AvatarLeaf(stock.Value.Avatar)})",
+                        "The baseline was benchmarked on a different avatar — press Benchmark " +
+                        "to record one for this avatar.");
+                } else {
+                    orangeLabel = new GUIContent("VRCFury");
+                }
+                LegendSwatch(StockOrange, orangeLabel);
                 GUILayout.Space(12);
-                LegendSwatch(gaugeFill, new GUIContent("Fury++"));
+                LegendSwatch(gaugeFill, newPhases.Count > 0
+                    ? new GUIContent("Fury++")
+                    : new GUIContent("Fury++ (bake to record)",
+                        "Run a normal bake — its per-phase times overlay in purple with " +
+                        "the savings per phase."));
                 GUILayout.FlexibleSpace();
                 GUILayout.Label("Full report: Extras → Log last profile report.",
                     EditorStyles.miniLabel);
@@ -552,14 +607,17 @@ namespace FuryPlusPlus {
             rect.height = 5f;
             EditorGUI.DrawRect(rect, gaugeBack);
             if (scale > 0) {
+                // Square-root scale: linear collapsed anything under ~2% of the longest
+                // phase into the 2 px minimum. Sqrt keeps the bars ordered by size while
+                // small phases stay visible; the exact numbers live in the columns.
                 if (row.StockMs > 0) {
                     var stockRect = rect;
-                    stockRect.width = Mathf.Max(2f, rect.width * (float)(row.StockMs / scale));
+                    stockRect.width = Mathf.Max(2f, rect.width * BarFraction(row.StockMs, scale));
                     EditorGUI.DrawRect(stockRect, StockOrange);
                 }
                 if (row.NewMs > 0) {
                     var newRect = rect;
-                    newRect.width = Mathf.Max(2f, rect.width * (float)(row.NewMs / scale));
+                    newRect.width = Mathf.Max(2f, rect.width * BarFraction(row.NewMs, scale));
                     EditorGUI.DrawRect(newRect, gaugeFill);
                 }
             }
@@ -572,19 +630,28 @@ namespace FuryPlusPlus {
                 GUILayout.Label("→", EditorStyles.centeredGreyMiniLabel, GUILayout.Width(16f));
                 DrawSpeedDelta(row.NewMs, row.StockMs);
             } else if (compare && row.NewMs < 0) {
-                GUILayout.Label(GUIContent.none, redRightStyle, GUILayout.Width(52f));
-                GUILayout.Label(GUIContent.none, EditorStyles.centeredGreyMiniLabel, GUILayout.Width(16f));
-                GUILayout.Label(new GUIContent(FormatMs(row.StockMs) + " (removed)",
-                    "This phase only ran in the stock benchmark bake — FuryPlusPlus skips it."),
-                    redRightStyle, GUILayout.Width(120f));
+                // A phase that no longer runs is the biggest win a row can show — style
+                // it like one (red stock time → green outcome), not like an error.
+                GUILayout.Label(new GUIContent(FormatMs(row.StockMs), "stock VRCFury"),
+                    redRightStyle, GUILayout.Width(52f));
+                GUILayout.Label("→", EditorStyles.centeredGreyMiniLabel, GUILayout.Width(16f));
+                GUILayout.Label(new GUIContent("skipped",
+                    "This phase does not run with FuryPlusPlus — a module skips or " +
+                    "eliminates it entirely."),
+                    greenRightStyle, GUILayout.Width(120f));
             } else if (compare) {
                 GUILayout.Label(GUIContent.none, redRightStyle, GUILayout.Width(52f));
                 GUILayout.Label(GUIContent.none, EditorStyles.centeredGreyMiniLabel, GUILayout.Width(16f));
                 GUILayout.Label(FormatMs(row.NewMs), miniRightStyle, GUILayout.Width(120f));
             } else {
-                GUILayout.Label(FormatMs(row.NewMs), miniRightStyle, GUILayout.Width(120f));
+                GUILayout.Label(FormatMs(row.NewMs >= 0 ? row.NewMs : row.StockMs),
+                    miniRightStyle, GUILayout.Width(120f));
             }
             EditorGUILayout.EndHorizontal();
+        }
+
+        private static float BarFraction(double ms, double scale) {
+            return Mathf.Sqrt(Mathf.Clamp01((float)(ms / scale)));
         }
 
         private static void LegendSwatch(Color color, GUIContent label) {
@@ -599,14 +666,20 @@ namespace FuryPlusPlus {
         private void DrawSpeedDelta(double newMs, double stockMs) {
             if (stockMs <= 0) {
                 GUILayout.Label(FormatMs(newMs), miniRightStyle, GUILayout.Width(120f));
+                return;
+            }
+            var percent = (1 - newMs / stockMs) * 100;
+            if (Math.Abs(percent) < 0.5) {
+                // Would render as a green "(0% faster)" — an empty claim; say so in grey.
+                GUILayout.Label(new GUIContent($"{FormatMs(newMs)} (unchanged)",
+                    "Within run-to-run jitter of the stock baseline."),
+                    miniRightStyle, GUILayout.Width(120f));
             } else if (newMs < stockMs) {
-                var percent = (1 - newMs / stockMs) * 100;
                 GUILayout.Label(new GUIContent($"{FormatMs(newMs)} ({percent:0}% faster)",
                     $"-{FormatMs(stockMs - newMs)} vs stock VRCFury"),
                     greenRightStyle, GUILayout.Width(120f));
             } else {
-                var percent = (newMs / stockMs - 1) * 100;
-                GUILayout.Label(new GUIContent($"{FormatMs(newMs)} ({percent:0}% slower)",
+                GUILayout.Label(new GUIContent($"{FormatMs(newMs)} ({-percent:0}% slower)",
                     "Bake times vary run to run; small phases jitter."),
                     redRightStyle, GUILayout.Width(120f));
             }

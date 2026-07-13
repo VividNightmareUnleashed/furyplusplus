@@ -160,7 +160,7 @@ namespace FuryPlusPlus {
             if (__exception == null) {
                 try {
                     BakeHistory.RecordBake(
-                        ToMilliseconds(elapsed), runAvatar, MeaningfulPhases(elapsed), stockRun);
+                        ToMilliseconds(elapsed), runAvatar, MeaningfulPhases(), stockRun);
                 } catch {
                     // History is cosmetic; recording must never break a bake.
                 }
@@ -171,16 +171,19 @@ namespace FuryPlusPlus {
         }
 
         /**
-         * Every phase big enough to matter in the settings-window breakdown: at least 25 ms
-         * or 0.5% of the bake, capped so the EditorPrefs payload stays small.
+         * Every phase that ran, down to 1 ms, capped so the persisted payload stays small.
+         * The floor must stay near zero: any higher and a phase FuryPlusPlus speeds up
+         * below the floor drops out of the record entirely, which the breakdown then
+         * mislabels as "removed". Deciding what is big enough to *show* is the settings
+         * window's job, not the recorder's.
          */
-        private static List<(string Name, double Ms)> MeaningfulPhases(long totalTicks) {
-            var floor = Math.Max(25.0, ToMilliseconds(totalTicks) * 0.005);
+        private static List<(string Name, double Ms)> MeaningfulPhases() {
+            const double floor = 1.0;
             return Actions
                 .OrderByDescending(pair => pair.Value.InclusiveTicks)
                 .Select(pair => (pair.Key, ToMilliseconds(pair.Value.InclusiveTicks)))
                 .Where(pair => pair.Item2 >= floor)
-                .Take(24)
+                .Take(128)
                 .ToList();
         }
 
