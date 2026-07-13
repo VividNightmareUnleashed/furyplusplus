@@ -45,6 +45,8 @@ namespace FuryPlusPlus {
             // --- New FuryPlusPlus speed modules ---
             new PlayModeSkipsModule(),
             new ProgressWindowThemeModule(),
+            new LayerToTreeBindingIndexModule(),
+            new CompressorMemoModule(),
             // --- Quality passes (post-build hook order) ---
             new StripUnusedParamsModule(),
         };
