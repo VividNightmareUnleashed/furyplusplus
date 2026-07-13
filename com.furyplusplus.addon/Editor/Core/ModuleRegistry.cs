@@ -48,6 +48,7 @@ namespace FuryPlusPlus {
             new LayerToTreeBindingIndexModule(),
             new CompressorMemoModule(),
             new GetLayersMemoModule(),
+            new MergePathCacheModule(),
             // --- Quality passes (post-build hook order) ---
             new StripUnusedParamsModule(),
             new FullScopeDbtModule(),
