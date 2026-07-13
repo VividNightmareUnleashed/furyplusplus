@@ -1,10 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.RegularExpressions;
 using HarmonyLib;
 using UnityEditor;
 using UnityEngine;
@@ -94,9 +90,7 @@ namespace FuryPlusPlus {
         private static int chainDepth;
         private static readonly HashSet<int> chainSeen = new HashSet<int>();
 
-        private static string DirPath => Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "FuryPlusPlus", "BakeCache");
+        private static string DirPath => BakeFingerprint.DirPath;
 
         private static Type vrcfuryTestType;
         private static System.Reflection.MethodInfo isActuallyUploading;
@@ -175,12 +169,12 @@ namespace FuryPlusPlus {
                 if (avatarObject.GetComponent(vrcfuryTestType) != null) return;
 
                 var hashTimer = System.Diagnostics.Stopwatch.StartNew();
-                var record = Fingerprint(avatarObject, "");
+                var record = ToRecord(BakeFingerprint.Compute(avatarObject, ""));
                 hashTimer.Stop();
 
                 // Initiators rename the processed root (e.g. "(Clone)"); normalize.
                 var avatarName = avatarObject.name.Replace("(Clone)", "").Trim();
-                pendingKey = SanitizeKey(avatarObject.scene.name + "__" + avatarName);
+                pendingKey = BakeFingerprint.SanitizeKey(avatarObject.scene.name + "__" + avatarName);
                 pendingRecord = record;
 
                 CacheRecord previous = null;
@@ -293,11 +287,11 @@ namespace FuryPlusPlus {
                 if (!chainSeen.Add(avatarObject.GetInstanceID())) return;
 
                 var hashTimer = System.Diagnostics.Stopwatch.StartNew();
-                var record = Fingerprint(avatarObject, "chain-");
+                var record = ToRecord(BakeFingerprint.Compute(avatarObject, "chain-"));
                 hashTimer.Stop();
 
                 var avatarName = avatarObject.name.Replace("(Clone)", "").Trim();
-                chainKey = SanitizeKey(avatarObject.scene.name + "__" + avatarName) + ".chain";
+                chainKey = BakeFingerprint.SanitizeKey(avatarObject.scene.name + "__" + avatarName) + ".chain";
                 chainRecord = record;
 
                 CacheRecord previous = null;
@@ -381,189 +375,15 @@ namespace FuryPlusPlus {
             return __exception;
         }
 
-        // ---- fingerprinting ----
-
-        private static readonly Regex InstanceRef = new Regex("\\{\"instanceID\":(-?\\d+)\\}");
-        private static readonly Regex GuidRef = new Regex(
-            "\\{\"fileID\":(-?\\d+),\"guid\":\"([0-9a-f]{32})\",\"type\":\\d+\\}");
-
-        private static CacheRecord Fingerprint(GameObject avatar, string dumpPrefix) {
-            var referencedAssetPaths = new SortedSet<string>(StringComparer.Ordinal);
-            var generatedAssetPaths = new SortedSet<string>(StringComparer.Ordinal);
-            var refCache = new Dictionary<long, string>();
-            var avatarRoot = avatar.transform;
-            var upstreamGenerated = false;
-
-            string ScenePath(Transform transform) {
-                // Under the avatar: relative (the root's name/position vary per initiator).
-                for (var walk = transform; walk != null; walk = walk.parent) {
-                    if (walk == avatarRoot) return "~/" + HierarchyPath(transform, avatarRoot);
-                }
-                return HierarchyPath(transform);
-            }
-
-            string StabilizeReference(long instanceId) {
-                if (instanceId == 0) return "null";
-                if (refCache.TryGetValue(instanceId, out var cached)) return cached;
-                string stable;
-                var obj = EditorUtility.InstanceIDToObject((int)instanceId);
-                if (obj == null) {
-                    stable = "dead";
-                } else {
-                    var path = AssetDatabase.GetAssetPath(obj);
-                    if (!string.IsNullOrEmpty(path)) {
-                        if (path.Contains("/__Generated/") || path.StartsWith("Packages/com.vrcfury.temp")) {
-                            // Upstream-generated container (NDMF/MA output, VRCFury temp):
-                            // sub-asset localIds are random per regeneration, so the
-                            // reference is identified by filename only — but the file's
-                            // CONTENT still joins a dedicated generated-assets hash, so
-                            // regeneration shows up as an honest, precisely-named miss.
-                            upstreamGenerated = true;
-                            generatedAssetPaths.Add(path);
-                            stable = "generated:" + Path.GetFileName(path);
-                        } else {
-                            referencedAssetPaths.Add(path);
-                            AssetDatabase.TryGetGUIDAndLocalFileIdentifier(obj, out var guid, out long localId);
-                            stable = $"asset:{guid}:{localId}";
-                        }
-                    } else if (obj is GameObject go) {
-                        stable = "scene:" + ScenePath(go.transform);
-                    } else if (obj is Component component) {
-                        stable = "scene:" + ScenePath(component.transform) + ":" + component.GetType().Name;
-                    } else {
-                        stable = "mem:" + obj.GetType().Name + ":" + obj.name;
-                    }
-                }
-                refCache[instanceId] = stable;
-                return stable;
-            }
-
-            var hierarchy = new StringBuilder();
-            var root = avatar.transform;
-            foreach (var transform in avatar.GetComponentsInChildren<Transform>(true)) {
-                // Relative to the avatar root: the root's own name ("(Clone)" suffixes)
-                // and scene sibling position vary by play-mode initiator.
-                hierarchy.Append(HierarchyPath(transform, root))
-                    .Append('|').Append(transform.gameObject.activeSelf ? '1' : '0').Append('\n');
-                foreach (var component in transform.GetComponents<Component>()) {
-                    if (component == null) {
-                        hierarchy.Append("missing-script\n");
-                        continue;
-                    }
-                    if (component is Transform) continue;
-                    hierarchy.Append(component.GetType().FullName).Append('#');
-                    string json;
-                    try {
-                        json = EditorJsonUtility.ToJson(component);
-                    } catch {
-                        json = "unserializable";
-                    }
-                    json = InstanceRef.Replace(json,
-                        match => StabilizeReference(long.Parse(match.Groups[1].Value)));
-                    // Persisted refs serialize as fileID+guid directly: collect real
-                    // assets for the dependency hash, neutralize per-bake generated ones.
-                    json = GuidRef.Replace(json, match => {
-                        var guid = match.Groups[2].Value;
-                        var path = AssetDatabase.GUIDToAssetPath(guid);
-                        if (string.IsNullOrEmpty(path)) return match.Value;
-                        if (path.Contains("/__Generated/") || path.StartsWith("Packages/com.vrcfury.temp")) {
-                            upstreamGenerated = true;
-                            generatedAssetPaths.Add(path);
-                            return "generated:" + Path.GetFileName(path);
-                        }
-                        referencedAssetPaths.Add(path);
-                        return match.Value;
-                    });
-                    hierarchy.Append(json);
-                    hierarchy.Append('\n');
-                }
-            }
-
-            var assets = new StringBuilder();
-            foreach (var path in referencedAssetPaths) {
-                assets.Append(path).Append('#')
-                    .Append(AssetDatabase.GetAssetDependencyHash(path).ToString()).Append('\n');
-            }
-
-            var generated = new StringBuilder();
-            foreach (var path in generatedAssetPaths) {
-                generated.Append(path).Append('#')
-                    .Append(AssetDatabase.GetAssetDependencyHash(path).ToString()).Append('\n');
-            }
-
-            var config = new StringBuilder();
-            config.Append("target:").Append(EditorUserBuildSettings.activeBuildTarget).Append('\n');
-            config.Append("unity:").Append(Application.unityVersion).Append('\n');
-            var compat = Bootstrap.Compat;
-            config.Append("vrcfury:").Append(compat?.PackageVersion).Append(':')
-                .Append(compat?.ModuleVersionId).Append('\n');
-            config.Append("modules:").Append(ModuleRegistry.DescribeStates()).Append('\n');
-            // NDMF plugins (Modular Avatar etc.) register through NDMF, not as SDK preprocess
-            // callbacks, so the "pre:" list below misses their version changes entirely.
-            config.Append("ndmf:").Append(PreprocessChainCompat.DescribeNdmfPlugins()).Append('\n');
-            foreach (var callback in TypeCache
-                         .GetTypesDerivedFrom<VRC.SDKBase.Editor.BuildPipeline.IVRCSDKPreprocessAvatarCallback>()
-                         .Where(type => !type.IsAbstract)
-                         .OrderBy(type => type.FullName, StringComparer.Ordinal)) {
-                config.Append("pre:").Append(callback.FullName).Append(':')
-                    .Append(callback.Assembly.GetName().Version).Append('\n');
-            }
-
-            // Diagnostic dump for chasing fingerprint instability (the whole point of the
-            // dry run): set the pref, bake twice, diff the *-prev/*-curr files.
-            if (EditorPrefs.GetBool(Settings.KeyPrefix + "bakeCache.debugDump", false)) {
-                try {
-                    Directory.CreateDirectory(DirPath);
-                    foreach (var (name, text) in new[] {
-                                 ("hierarchy", hierarchy.ToString()),
-                                 ("assets", assets.ToString()),
-                                 ("config", config.ToString()),
-                                 ("generated", generated.ToString())
-                             }) {
-                        var current = Path.Combine(DirPath, $"debug-{dumpPrefix}{name}-curr.txt");
-                        var previous = Path.Combine(DirPath, $"debug-{dumpPrefix}{name}-prev.txt");
-                        if (File.Exists(current)) {
-                            File.Copy(current, previous, true);
-                        }
-                        File.WriteAllText(current, text);
-                    }
-                } catch {
-                    // diagnostics only
-                }
-            }
-
+        /** Fingerprint → persisted record; hit/miss tallies and timing are filled in later. */
+        private static CacheRecord ToRecord(BakeFingerprint.Result result) {
             return new CacheRecord {
-                hierarchyHash = Sha(hierarchy.ToString()),
-                assetsHash = Sha(assets.ToString()),
-                configHash = Sha(config.ToString()),
-                generatedHash = Sha(generated.ToString()),
-                upstreamGenerated = upstreamGenerated
+                hierarchyHash = result.HierarchyHash,
+                assetsHash = result.AssetsHash,
+                configHash = result.ConfigHash,
+                generatedHash = result.GeneratedHash,
+                upstreamGenerated = result.UpstreamGenerated
             };
-        }
-
-        private static string HierarchyPath(Transform transform, Transform root = null) {
-            var parts = new List<string>();
-            while (transform != null && transform != root) {
-                parts.Add(transform.GetSiblingIndex() + ":" + transform.name);
-                transform = transform.parent;
-            }
-            parts.Reverse();
-            return string.Join("/", parts);
-        }
-
-        private static string Sha(string input) {
-            using (var sha = SHA256.Create()) {
-                return BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(input)))
-                    .Replace("-", "").Substring(0, 32);
-            }
-        }
-
-        private static string SanitizeKey(string raw) {
-            var builder = new StringBuilder(raw.Length);
-            foreach (var c in raw) {
-                builder.Append(char.IsLetterOrDigit(c) || c == '-' || c == '_' ? c : '_');
-            }
-            return builder.ToString();
         }
     }
 }

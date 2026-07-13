@@ -39,6 +39,28 @@ namespace FuryPlusPlus.Tests.Editor {
         }
 
         [Test]
+        public void DescribeStatesIncludesOptionStates() {
+            var module = ModuleRegistry.All.First(candidate => candidate.Options.Count > 0);
+            var option = module.Options[0];
+            var key = Settings.OptionKey(module, option);
+            var had = UnityEditor.EditorPrefs.HasKey(key);
+            var previous = had && Settings.IsOptionEnabled(module, option);
+            try {
+                Settings.SetOptionEnabled(module, option, true);
+                var whenOn = ModuleRegistry.DescribeStates();
+                Settings.SetOptionEnabled(module, option, false);
+                var whenOff = ModuleRegistry.DescribeStates();
+                Assert.That(whenOn, Does.Contain($"[{option.Suffix}=on"),
+                    "option states must join the summary (it feeds the bake-cache config hash)");
+                Assert.That(whenOff, Does.Contain($"[{option.Suffix}=off"));
+                Assert.That(whenOn, Is.Not.EqualTo(whenOff));
+            } finally {
+                if (had) Settings.SetOptionEnabled(module, option, previous);
+                else UnityEditor.EditorPrefs.DeleteKey(key);
+            }
+        }
+
+        [Test]
         public void QualityModulesRequireExactVersion() {
             foreach (var module in ModuleRegistry.All) {
                 if (module.Kind == ModuleKind.Quality) {

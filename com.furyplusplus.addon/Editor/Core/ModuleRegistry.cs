@@ -121,7 +121,11 @@ namespace FuryPlusPlus {
             return All.Where(module => module.Kind == kind);
         }
 
-        /** Compact per-module state summary for the profiler report footer. */
+        /**
+         * Compact per-module state summary for the profiler report footer. Sub-option states
+         * ride along as id=on[opt1=on,opt2=off] because this string also feeds the bake-cache
+         * config hash: an option flip changes bake output, so it must invalidate the cache.
+         */
         internal static string DescribeStates() {
             var builder = new StringBuilder();
             foreach (var module in All) {
@@ -131,6 +135,11 @@ namespace FuryPlusPlus {
                     ? (module.Enabled ? "on" : "off")
                     : status.State.ToString();
                 builder.Append(module.Id).Append('=').Append(suffix);
+                for (var i = 0; i < module.Options.Count; i++) {
+                    builder.Append(i == 0 ? '[' : ',').Append(module.Options[i].Suffix).Append('=')
+                        .Append(Settings.IsOptionEnabled(module, module.Options[i]) ? "on" : "off");
+                }
+                if (module.Options.Count > 0) builder.Append(']');
             }
             return builder.Length > 0 ? builder.ToString() : "(no modules)";
         }
