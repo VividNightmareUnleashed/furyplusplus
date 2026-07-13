@@ -23,9 +23,25 @@ namespace FuryPlusPlus {
          */
         internal static readonly Module[] All = {
             new ProfilingModule(),
-            // --- Speed (ported from QuickFury) ---
+            // --- Speed (ported from QuickFury; QuickFury's exact install order) ---
+            new OrderedPathRewriteModule(),
+            new ArmatureConstraintIndexModule(),
+            new ArmaturePhysboneIndexModule(),
+            new ArmatureSkinIndexModule(),
+            new ArmatureDestroyIndexModule(),
+            new ArmatureDebugInfoModule(),
+            new FastArmatureMoveModule(),
+            new SaveAssetsDiscoveryModule(),
+            new SaveAssetsBatchingModule(),
+            new ConsolidatedAssetContainerModule(),
+            new FastControllerAssetGraphModule(),
+            new BlendshapeBindingCacheModule(),
+            new SpsCoveredRendererModule(),
+            new SpsMaterialProbeCacheModule(),
             new ControllerParameterIndexModule(),
             new LayerToTreeLayerIndexModule(),
+            new TrackingBehaviourIndexModule(),
+            new BehaviourContainerFilterModule(),
         };
 
         private static readonly Dictionary<string, (ModuleState State, string Message)> Statuses =
