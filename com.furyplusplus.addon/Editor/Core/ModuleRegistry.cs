@@ -51,6 +51,7 @@ namespace FuryPlusPlus {
             new StripUnusedParamsModule(),
             new FullScopeDbtModule(),
             new NoOpCurveStripModule(),
+            new ClipDedupModule(),
         };
 
         private static readonly Dictionary<string, (ModuleState State, string Message)> Statuses =
