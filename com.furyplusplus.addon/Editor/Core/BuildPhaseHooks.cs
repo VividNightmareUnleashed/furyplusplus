@@ -31,8 +31,38 @@ namespace FuryPlusPlus {
         private static Type featureOrderType;
         private static MethodInfo actionGetPriorty;
         private static MethodInfo actionGetService;
+        private static FieldInfo vfGameObjectField;
+        private static MethodInfo getInjector;
+        private static MethodInfo injectorGetService;
+        private static Type injectorContextType;
+        private static UnityEngine.GameObject currentAvatarRoot;
 
         internal static bool Installed => installed;
+
+        /** Root of the avatar currently being built (null outside a build). */
+        internal static UnityEngine.GameObject CurrentAvatarRoot => runActive ? currentAvatarRoot : null;
+
+        /**
+         * Resolves a live per-build VRCFury service (same injector instance the build uses).
+         * Returns null when unavailable — callers must treat that as "skip this run".
+         */
+        internal static object GetService(string typeFullName) {
+            try {
+                if (!runActive || currentAvatarRoot == null) return null;
+                var descriptor = currentAvatarRoot
+                    .GetComponent<VRC.SDK3.Avatars.Components.VRCAvatarDescriptor>();
+                if (descriptor == null) return null;
+                var injector = getInjector.Invoke(null, new object[] { descriptor });
+                if (injector == null) return null;
+                var serviceType = ReflectionUtils.FindType(typeFullName);
+                if (serviceType == null) return null;
+                return injectorGetService.Invoke(injector, new[] {
+                    serviceType, Activator.CreateInstance(injectorContextType)
+                });
+            } catch {
+                return null;
+            }
+        }
 
         internal static void Install(Harmony harmony, VrcfuryCompat compat) {
             installed = false;
@@ -56,6 +86,29 @@ namespace FuryPlusPlus {
                 "FeatureBuilderAction.GetPriorty()"
             );
             actionGetService = compat.ActionGetService;
+
+            var vfGameObjectType = ReflectionUtils.Demand(
+                ReflectionUtils.FindType("VF.Utils.VFGameObject"), "VF.Utils.VFGameObject");
+            vfGameObjectField = ReflectionUtils.Demand(
+                vfGameObjectType.GetField("_gameObject",
+                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public),
+                "VFGameObject._gameObject");
+            var injectorBuilderType = ReflectionUtils.Demand(
+                ReflectionUtils.FindType("VF.Builder.VRCFuryInjectorBuilder"),
+                "VF.Builder.VRCFuryInjectorBuilder");
+            getInjector = ReflectionUtils.Demand(
+                ReflectionUtils.FindUniqueMethod(injectorBuilderType, "GetInjector",
+                    method => method.IsStatic && method.GetParameters().Length == 1),
+                "VRCFuryInjectorBuilder.GetInjector(...)");
+            var injectorType = ReflectionUtils.Demand(
+                ReflectionUtils.FindType("VF.Injector.VRCFuryInjector"), "VF.Injector.VRCFuryInjector");
+            // The non-generic resolver is private GetService(Type, Context = default).
+            injectorGetService = ReflectionUtils.Demand(
+                ReflectionUtils.FindUniqueMethod(injectorType, "GetService",
+                    method => method.GetParameters().Length == 2
+                              && method.GetParameters()[0].ParameterType == typeof(Type)),
+                "VRCFuryInjector.GetService(Type, Context)");
+            injectorContextType = injectorGetService.GetParameters()[1].ParameterType;
 
             harmony.Patch(
                 compat.RunMain,
@@ -101,10 +154,15 @@ namespace FuryPlusPlus {
             });
         }
 
-        private static void RunPrefix() {
+        private static void RunPrefix(object __0) {
             foreach (var hook in Hooks) {
                 hook.Fired = false;
                 hook.Broken = false;
+            }
+            try {
+                currentAvatarRoot = vfGameObjectField.GetValue(__0) as UnityEngine.GameObject;
+            } catch {
+                currentAvatarRoot = null;
             }
             runActive = true;
         }
@@ -133,17 +191,19 @@ namespace FuryPlusPlus {
 
         private static Exception RunFinalizer(Exception __exception) {
             if (!runActive) return __exception;
-            runActive = false;
 
             if (__exception == null) {
                 // Phases at the very end of the build have no later action; flush their
-                // "after" hooks now. Skipped when the build failed — half-built state.
+                // "after" hooks now — BEFORE clearing run state, so GetService and
+                // CurrentAvatarRoot still work inside them. Skipped when the build failed.
                 foreach (var hook in Hooks) {
                     if (hook.Fired || hook.Broken || !hook.After) continue;
                     hook.Fired = true;
                     Fire(hook, null);
                 }
             }
+            runActive = false;
+            currentAvatarRoot = null;
             return __exception;
         }
 

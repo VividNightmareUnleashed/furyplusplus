@@ -50,6 +50,7 @@ namespace FuryPlusPlus {
             // --- Quality passes (post-build hook order) ---
             new StripUnusedParamsModule(),
             new FullScopeDbtModule(),
+            new NoOpCurveStripModule(),
         };
 
         private static readonly Dictionary<string, (ModuleState State, string Message)> Statuses =
