@@ -5,7 +5,7 @@
   "unity": "2022.3",
   "description": "Bolt-on speed and output-quality layer for VRCFury avatar bakes. Faster builds, fewer animator layers, fewer sync bits, less VRAM.",
   "author": {
-    "name": "Vivid Nightmare"
+    "name": "vividnightmare"
   },
   "vpmDependencies": {
     "com.vrcfury.vrcfury": ">=1.1363.0",
