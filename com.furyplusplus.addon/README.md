@@ -6,8 +6,9 @@ parameter bits, less VRAM. It profiles VRCFury's bake and replaces measured hot 
 implementations. It does not ship, fork, or modify VRCFury.
 
 FuryPlusPlus is the successor to **QuickFury** and includes ports of all 21 of its validated speed
-patches. The two cannot coexist: FuryPlusPlus refuses to initialize while QuickFury is installed
-(remove `com.quickfury.addon`; settings do not carry over).
+patches. The two cannot run together: while QuickFury is installed, FuryPlusPlus disables
+QuickFury's patches each session and warns. Remove `com.quickfury.addon` (settings do not carry
+over).
 
 FuryPlusPlus 0.1.0 is tested against VRCFury 1.1363.0. On the reference avatar it reduced a warm
 VRCFury bake from **93.8 seconds (stock) to 12.6 seconds**, timing-equivalent to QuickFury 1.2.4
@@ -32,7 +33,8 @@ later VRCFury versions are compatible with the version-pinned modules.
 ## Install
 
 1. Install VRCFury normally and confirm the avatar builds without FuryPlusPlus.
-2. If QuickFury is installed, remove it first.
+2. If QuickFury is installed, remove it. (FuryPlusPlus suppresses QuickFury's patches while it is
+   present, but the package should not stay installed.)
 3. In Unity, choose **Window > Package Manager**, use **+ > Add package from disk**, and select
    this package's `package.json`.
 4. Wait for the Editor to recompile. The Console should report

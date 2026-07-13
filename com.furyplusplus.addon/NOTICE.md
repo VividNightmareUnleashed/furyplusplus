@@ -31,5 +31,5 @@ https://github.com/VRCFury/VRCFury/blob/main/LICENSE.md
 ## Relationship to QuickFury
 
 FuryPlusPlus is the successor to QuickFury and includes ports of all of its bake-speed patches.
-The two packages patch the same VRCFury methods and must never be installed together;
-FuryPlusPlus refuses to initialize while QuickFury is present.
+The two packages patch the same VRCFury methods and must never run together; while QuickFury is
+present, FuryPlusPlus removes QuickFury's Harmony patches and warns the user to uninstall it.

@@ -28,10 +28,7 @@ namespace FuryPlusPlus {
             Compat = null;
             DisabledReason = null;
 
-            if (Coexistence.RefuseIfQuickFury()) {
-                DisabledReason = "QuickFury is installed";
-                return;
-            }
+            Coexistence.SuppressQuickFury(Harmony);
             if (!Settings.MasterEnabled) {
                 DisabledReason = "master switch off";
                 Log.Info("Disabled by master switch.");
