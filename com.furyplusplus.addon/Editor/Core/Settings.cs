@@ -5,7 +5,6 @@ namespace FuryPlusPlus {
         internal const string KeyPrefix = "com.furyplusplus.";
         internal const string MasterKey = KeyPrefix + "enabled";
         internal const string DetailedProfilingKey = KeyPrefix + "profiling.detailed";
-        internal const string WelcomeShownVersionKey = KeyPrefix + "welcomeShownVersion";
 
         // Cached so hot phase-boundary checks never hit EditorPrefs; refreshed on every write.
         private static bool? masterCache;

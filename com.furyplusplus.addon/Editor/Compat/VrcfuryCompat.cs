@@ -38,14 +38,25 @@ namespace FuryPlusPlus {
             }
         }
 
+        internal static Assembly FindAvatarsAssembly() {
+            return AppDomain.CurrentDomain.GetAssemblies()
+                .FirstOrDefault(a => a.GetName().Name == AvatarsEditorAssemblyName);
+        }
+
+        /** Version of the installed VRCFury package, or null when it is not loaded at all. */
+        internal static string LoadedPackageVersion() {
+            var avatarsAssembly = FindAvatarsAssembly();
+            if (avatarsAssembly == null) return null;
+            return PackageInfo.FindForAssembly(avatarsAssembly)?.version ?? "unknown";
+        }
+
         internal static bool TryCreate(out VrcfuryCompat compat, out string error) {
             compat = null;
             error = null;
 
             try {
                 var output = new VrcfuryCompat();
-                var avatarsAssembly = AppDomain.CurrentDomain.GetAssemblies()
-                    .FirstOrDefault(a => a.GetName().Name == AvatarsEditorAssemblyName);
+                var avatarsAssembly = FindAvatarsAssembly();
                 if (avatarsAssembly == null) {
                     error = AvatarsEditorAssemblyName + " is not loaded";
                     return false;

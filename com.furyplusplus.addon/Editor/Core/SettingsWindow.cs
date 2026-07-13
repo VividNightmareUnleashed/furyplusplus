@@ -77,8 +77,8 @@ namespace FuryPlusPlus {
             },
             new TabDef {
                 Kind = ModuleKind.Pass, Title = "Passes",
-                Note = "Standalone SDK preprocessor passes — these stay active even on untested " +
-                       "VRCFury versions.",
+                Note = "Standalone SDK preprocessor passes that run on the finished avatar — " +
+                       "version-pinned like everything else.",
                 Groups = new[] {
                     ("Synced parameters", new[] { "stripUnusedParams", "narrowIntParams" }),
                 },
@@ -720,9 +720,12 @@ namespace FuryPlusPlus {
                     );
                 } else {
                     EditorGUILayout.HelpBox(
-                        $"VRCFury {compat.PackageVersion} detected — tested with {VrcfuryCompat.PinnedVersion}. " +
-                        "Version-pinned modules are disabled (profiling and SDK-level passes stay active).",
-                        MessageType.Warning
+                        "UNSUPPORTED VRCFURY VERSION — ALL FEATURES DISABLED.\n" +
+                        $"VRCFury {compat.PackageVersion} detected, but this build is validated only " +
+                        $"against {VrcfuryCompat.PinnedVersion}. Avatars bake with stock VRCFury; only " +
+                        "the bake profiler and editor visuals stay active. Install VRCFury " +
+                        $"{VrcfuryCompat.PinnedVersion} or update FuryPlusPlus.",
+                        MessageType.Error
                     );
                 }
             } else if (Bootstrap.DisabledReason != null) {
