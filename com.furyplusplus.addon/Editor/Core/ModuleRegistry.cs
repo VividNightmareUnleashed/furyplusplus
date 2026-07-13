@@ -72,6 +72,8 @@ namespace FuryPlusPlus {
             // --- Experimental play-mode iteration; both default OFF ---
             new PlayModeNoDiskSaveModule(),
             new BakeCacheDryRunModule(),
+            // --- UI: keeps the liquid progress bar animating inside long phases ---
+            new ProgressPumpModule(),
         };
 
         private static readonly Dictionary<string, (ModuleState State, string Message)> Statuses =
