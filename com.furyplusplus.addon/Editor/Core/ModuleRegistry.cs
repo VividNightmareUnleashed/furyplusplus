@@ -23,6 +23,9 @@ namespace FuryPlusPlus {
          */
         internal static readonly Module[] All = {
             new ProfilingModule(),
+            // --- Speed (ported from QuickFury) ---
+            new ControllerParameterIndexModule(),
+            new LayerToTreeLayerIndexModule(),
         };
 
         private static readonly Dictionary<string, (ModuleState State, string Message)> Statuses =
