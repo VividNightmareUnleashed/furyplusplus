@@ -66,6 +66,14 @@ namespace FuryPlusPlus {
     }
 
     internal static class LayerToTreeBindingIndexPatch {
+        /**
+         * The layer whose OptimizeLayer call is currently executing, plus its own binding
+         * set — consumed by the off-side elimination module (it must not treat the
+         * candidate's own on-clip writes as conflicting). Null outside the loop.
+         */
+        internal static object CurrentCandidateLayer { get; private set; }
+        internal static ICollection<EditorCurveBinding> CurrentCandidateBindings { get; private set; }
+
         private static FieldInfo globalsField;
         private static FieldInfo directTreeServiceField;
         private static FieldInfo controllersField;
@@ -195,6 +203,7 @@ namespace FuryPlusPlus {
             object applyToLayers;
             object bindingsDict;
             Dictionary<object, HashSet<object>> relevantByLayer;
+            Dictionary<object, ICollection<EditorCurveBinding>> bindingsByLayerLocal;
             object lazyTree;
             try {
                 // ---- Phase 1: pure reads; any surprise → run stock Apply untouched. ----
@@ -214,7 +223,7 @@ namespace FuryPlusPlus {
 
                 bindingsDict = Activator.CreateInstance(filteringDictType);
                 var invertedIndex = new Dictionary<EditorCurveBinding, List<object>>();
-                var bindingsByLayerLocal = new Dictionary<object, ICollection<EditorCurveBinding>>();
+                bindingsByLayerLocal = new Dictionary<object, ICollection<EditorCurveBinding>>();
                 foreach (var layer in allLayers) {
                     var bindings = (ICollection<EditorCurveBinding>)ReflectionUtils.InvokeUnwrapped(
                         getBindingsAnimatedInLayer, __instance, new[] { layer });
@@ -256,6 +265,9 @@ namespace FuryPlusPlus {
                 untypedFilterField.SetValue(bindingsDict,
                     relevant == null ? (Func<object, bool>)null : relevant.Contains);
                 var layerName = layerNameProperty.GetValue(layer);
+                CurrentCandidateLayer = layer;
+                bindingsByLayerLocal.TryGetValue(layer, out var candidateBindings);
+                CurrentCandidateBindings = candidateBindings;
                 try {
                     optimizeLayer.Invoke(__instance, new[] { layer, bindingsDict, lazyTree });
                     debugLog.Add($"{layerName} - OPTIMIZED");
@@ -264,7 +276,12 @@ namespace FuryPlusPlus {
                     when (wrapped.InnerException?.GetType().Name == "DoNotOptimizeException") {
                     debugLog.Add($"{layerName} - Not Optimizing ({wrapped.InnerException.Message})");
                 } catch (TargetInvocationException wrapped) when (wrapped.InnerException != null) {
+                    CurrentCandidateLayer = null;
+                    CurrentCandidateBindings = null;
                     ExceptionDispatchInfo.Capture(wrapped.InnerException).Throw();
+                } finally {
+                    CurrentCandidateLayer = null;
+                    CurrentCandidateBindings = null;
                 }
             }
             Debug.Log("Optimization report:\n\n" + string.Join("\n", debugLog));
