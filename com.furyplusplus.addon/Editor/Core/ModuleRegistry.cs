@@ -69,6 +69,9 @@ namespace FuryPlusPlus {
             new CompressorSolverModule(),
             new CompressorEligibilityModule(),
             new CompressorSub8Module(),
+            // --- Experimental play-mode iteration; both default OFF ---
+            new PlayModeNoDiskSaveModule(),
+            new BakeCacheDryRunModule(),
         };
 
         private static readonly Dictionary<string, (ModuleState State, string Message)> Statuses =
