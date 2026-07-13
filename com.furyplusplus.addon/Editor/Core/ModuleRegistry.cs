@@ -42,6 +42,9 @@ namespace FuryPlusPlus {
             new LayerToTreeLayerIndexModule(),
             new TrackingBehaviourIndexModule(),
             new BehaviourContainerFilterModule(),
+            // --- New FuryPlusPlus speed modules ---
+            new PlayModeSkipsModule(),
+            new ProgressWindowThemeModule(),
         };
 
         private static readonly Dictionary<string, (ModuleState State, string Message)> Statuses =

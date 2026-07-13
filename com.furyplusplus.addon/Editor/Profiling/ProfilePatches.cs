@@ -297,6 +297,14 @@ namespace FuryPlusPlus {
         internal static double ToMilliseconds(long ticks) {
             return ticks * 1000.0 / Stopwatch.Frequency;
         }
+
+        /** Currently-executing VRCFury action and its elapsed time, if a profiled run is live. */
+        internal static (string Key, double ElapsedMs)? CurrentAction() {
+            var frames = actionFrames;
+            if (!active || frames == null || frames.Count == 0) return null;
+            var frame = frames.Peek();
+            return (frame.Key, ToMilliseconds(Stopwatch.GetTimestamp() - frame.Started));
+        }
     }
 
     /** The one intentional public surface — external scripts read the last bake report here. */
