@@ -57,6 +57,10 @@ namespace FuryPlusPlus {
             new NoOpCurveStripModule(),
             new ClipDedupModule(),
             new OffSideEliminationModule(),
+            // Toggle conversions fire before DBT consolidation (hook order = install order)
+            // so their created blendtree layers are consolidation candidates.
+            new ToggleSeparateLocalModule(),
+            new ToggleFadeModule(),
             new DbtConsolidationModule(),
             new BlendshapeAutoEnableModule(),
             new NarrowIntParamsModule(),
