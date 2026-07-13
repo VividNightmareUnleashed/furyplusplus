@@ -50,6 +50,7 @@ namespace FuryPlusPlus {
             new GetLayersMemoModule(),
             new MergePathCacheModule(),
             new AnimatorIteratorMemoModule(),
+            new BlendshapeBakeRewriteModule(),
             // --- Quality passes (post-build hook order) ---
             new StripUnusedParamsModule(),
             new FullScopeDbtModule(),
