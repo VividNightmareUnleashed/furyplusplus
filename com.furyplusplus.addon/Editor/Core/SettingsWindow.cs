@@ -5,11 +5,12 @@ using UnityEngine;
 
 namespace FuryPlusPlus {
     /**
-     * Preferences/FuryPlusPlus page. Renders defensively from ModuleRegistry.GetStatus —
-     * it can be opened before the delayCall bootstrap ran, or with VRCFury absent.
+     * The dedicated FuryPlusPlus window (Tools/FuryPlusPlus/Settings…). Renders defensively
+     * from ModuleRegistry.GetStatus — it can be opened before the delayCall bootstrap ran,
+     * or with VRCFury absent.
      */
-    internal static class FppSettingsProvider {
-        private static readonly Dictionary<ModuleKind, bool> Foldouts = new Dictionary<ModuleKind, bool> {
+    internal class SettingsWindow : EditorWindow {
+        private readonly Dictionary<ModuleKind, bool> foldouts = new Dictionary<ModuleKind, bool> {
             { ModuleKind.Speed, true },
             { ModuleKind.Quality, true },
             { ModuleKind.Pass, true },
@@ -23,15 +24,16 @@ namespace FuryPlusPlus {
             (ModuleKind.Cosmetic, "Extras"),
         };
 
-        [SettingsProvider]
-        public static SettingsProvider Create() {
-            return new SettingsProvider("Preferences/FuryPlusPlus", SettingsScope.User) {
-                guiHandler = _ => Draw(),
-                keywords = new HashSet<string> { "VRCFury", "FuryPlusPlus", "optimization", "bake", "avatar" }
-            };
+        private Vector2 scroll;
+
+        internal static void Open() {
+            var window = GetWindow<SettingsWindow>(utility: false, title: "FuryPlusPlus", focus: true);
+            window.minSize = new Vector2(420, 320);
+            window.Show();
         }
 
-        private static void Draw() {
+        private void OnGUI() {
+            scroll = EditorGUILayout.BeginScrollView(scroll);
             EditorGUILayout.Space();
             DrawStatusBanner();
             EditorGUILayout.Space();
@@ -64,13 +66,15 @@ namespace FuryPlusPlus {
                 foreach (var (kind, title) in Groups) {
                     var modules = ModuleRegistry.ByKind(kind).ToList();
                     if (modules.Count == 0) continue;
-                    Foldouts[kind] = EditorGUILayout.BeginFoldoutHeaderGroup(Foldouts[kind], title);
-                    if (Foldouts[kind]) {
+                    foldouts[kind] = EditorGUILayout.BeginFoldoutHeaderGroup(foldouts[kind], title);
+                    if (foldouts[kind]) {
                         foreach (var module in modules) DrawModule(module);
                     }
                     EditorGUILayout.EndFoldoutHeaderGroup();
                 }
             }
+
+            EditorGUILayout.EndScrollView();
         }
 
         private static void DrawStatusBanner() {

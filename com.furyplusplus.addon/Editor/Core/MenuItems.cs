@@ -6,7 +6,7 @@ namespace FuryPlusPlus {
 
         [MenuItem(Root + "Settings…", priority = 0)]
         private static void OpenSettings() {
-            SettingsService.OpenUserPreferences("Preferences/FuryPlusPlus");
+            SettingsWindow.Open();
         }
 
         [MenuItem(Root + "Disable all optimizations", priority = 40)]
