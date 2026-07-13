@@ -30,7 +30,24 @@ namespace FuryPlusPlus {
         }
 
         internal static bool IsModuleEnabled(Module module) {
-            return MasterEnabled && EditorPrefs.GetBool(ModuleKey(module), module.DefaultEnabled);
+            if (!MasterEnabled) return false;
+            if (BenchmarkForcesOff(module)) return false;
+            return EditorPrefs.GetBool(ModuleKey(module), module.DefaultEnabled);
+        }
+
+        /**
+         * While a stock benchmark is armed, every module except the profiler reads as
+         * disabled, so the next bake measures stock VRCFury with the same measurement
+         * overhead as a normal bake. Only bites while an installed, enabled profiler can
+         * actually complete the benchmark (and clear the flag at bake end) — otherwise
+         * the flag is inert instead of silently disabling every future bake.
+         */
+        private static bool BenchmarkForcesOff(Module module) {
+            if (module is ProfilingModule) return false;
+            if (!BakeHistory.BenchmarkPending) return false;
+            var profiling = ProfilingModule.Instance;
+            return profiling != null && ModuleRegistry.IsActive(profiling)
+                   && EditorPrefs.GetBool(ModuleKey(profiling), profiling.DefaultEnabled);
         }
 
         internal static void SetModuleEnabled(Module module, bool value) {
@@ -60,6 +77,7 @@ namespace FuryPlusPlus {
                 }
             }
             EditorPrefs.DeleteKey(DetailedProfilingKey);
+            BakeHistory.BenchmarkPending = false;
         }
 
         /** Panic switch: disable every module (master switch stays, for the nuclear option). */

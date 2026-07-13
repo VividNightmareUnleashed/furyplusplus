@@ -34,6 +34,8 @@ namespace FuryPlusPlus {
         private static bool detailedTargetsInstalled;
         private static bool active;
         private static long runStarted;
+        private static bool stockRun;
+        private static string runAvatar;
 
         internal static void Install(Harmony harmony, VrcfuryCompat targets) {
             harmonyInstance = harmony;
@@ -126,7 +128,7 @@ namespace FuryPlusPlus {
             ("VF.Builder.Haptics.PlugMaskGenerator", new[] { "GetMask" })
         };
 
-        private static void RunPrefix() {
+        private static void RunPrefix(object __0) {
             var module = ProfilingModule.Instance;
             if (module == null || !module.Enabled) {
                 active = false;
@@ -137,6 +139,13 @@ namespace FuryPlusPlus {
             actionFrames = new Stack<Frame>();
             detailed = Settings.DetailedProfiling;
             methodFrames = detailed ? new Stack<Frame>() : null;
+            stockRun = BakeHistory.BenchmarkPending;
+            try {
+                // RunMain's single argument is the avatar (VFGameObject; ToString = scene path).
+                runAvatar = __0?.ToString() ?? "";
+            } catch {
+                runAvatar = "";
+            }
             runStarted = Stopwatch.GetTimestamp();
             active = true;
         }
@@ -146,9 +155,33 @@ namespace FuryPlusPlus {
 
             var elapsed = Stopwatch.GetTimestamp() - runStarted;
             active = false;
+            // One-shot: the benchmark flag survives exactly one measured bake, pass or fail.
+            if (stockRun) BakeHistory.BenchmarkPending = false;
+            if (__exception == null) {
+                try {
+                    BakeHistory.RecordBake(
+                        ToMilliseconds(elapsed), runAvatar, MeaningfulPhases(elapsed), stockRun);
+                } catch {
+                    // History is cosmetic; recording must never break a bake.
+                }
+            }
             FuryPlusPlusProfilerApi.SetLastReport(BuildReport(elapsed, __exception));
             UnityEngine.Debug.Log(FuryPlusPlusProfilerApi.LastReport);
             return __exception;
+        }
+
+        /**
+         * Every phase big enough to matter in the settings-window breakdown: at least 25 ms
+         * or 0.5% of the bake, capped so the EditorPrefs payload stays small.
+         */
+        private static List<(string Name, double Ms)> MeaningfulPhases(long totalTicks) {
+            var floor = Math.Max(25.0, ToMilliseconds(totalTicks) * 0.005);
+            return Actions
+                .OrderByDescending(pair => pair.Value.InclusiveTicks)
+                .Select(pair => (pair.Key, ToMilliseconds(pair.Value.InclusiveTicks)))
+                .Where(pair => pair.Item2 >= floor)
+                .Take(24)
+                .ToList();
         }
 
         private static void ActionPrefix(object __instance) {
@@ -245,6 +278,7 @@ namespace FuryPlusPlus {
             var builder = new StringBuilder();
             builder.AppendLine(
                 $"[FuryPlusPlus] VRCFury profile: {ToMilliseconds(elapsedTicks):F3} ms total" +
+                (stockRun ? " (stock benchmark — FuryPlusPlus modules disabled)" : "") +
                 (exception == null ? "" : $" (failed: {exception.GetType().Name})")
             );
             if (exception != null) {
