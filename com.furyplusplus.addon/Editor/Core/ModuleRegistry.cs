@@ -49,6 +49,7 @@ namespace FuryPlusPlus {
             new CompressorMemoModule(),
             // --- Quality passes (post-build hook order) ---
             new StripUnusedParamsModule(),
+            new FullScopeDbtModule(),
         };
 
         private static readonly Dictionary<string, (ModuleState State, string Message)> Statuses =
