@@ -18,9 +18,17 @@ namespace FuryPlusPlus {
             public int algorithmVersion;
             public List<string> strippedParams = new List<string>();
             public List<string> narrowedParams = new List<string>();
+            // Compressor algorithm inputs (absent in v1 files ⇒ defaults ⇒ "features off",
+            // which is correct: those uploads predate the compressor modules).
+            public bool compressorLanePacking;
+            public string compressorSub8List = "";
+            public int compressorAlgoVersion;
         }
 
         internal const int AlgorithmVersion = 1;
+
+        /** Bump when the lane-packing/sub-8 batch geometry algorithm changes shape. */
+        internal const int CompressorAlgoVersion = 1;
 
         private static string DirPath => Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -28,6 +36,31 @@ namespace FuryPlusPlus {
 
         private static string FileFor(string blueprintId) {
             return Path.Combine(DirPath, blueprintId + ".json");
+        }
+
+        /**
+         * The compressor algorithm inputs that must match between a desktop and a mobile
+         * build of the same avatar. The decisions themselves replay through VRCFury's own
+         * alignment file; these inputs are the only extra state our deterministic
+         * geometry transforms depend on.
+         */
+        internal static (bool LanePacking, string Sub8List) CurrentCompressorInputs() {
+            var lanePacking = CompressorLanePackingModule.Instance != null
+                              && ModuleRegistry.IsActive(CompressorLanePackingModule.Instance)
+                              && CompressorLanePackingModule.Instance.Enabled;
+            var sub8On = CompressorSub8Module.Instance != null
+                         && ModuleRegistry.IsActive(CompressorSub8Module.Instance)
+                         && CompressorSub8Module.Instance.Enabled;
+            var sub8List = sub8On
+                ? NormalizeList(UnityEditor.EditorPrefs.GetString(CompressorScope.Sub8ListKey, ""))
+                : "";
+            return (lanePacking, sub8List);
+        }
+
+        private static string NormalizeList(string raw) {
+            return string.Join(";", raw.Split(';')
+                .Select(entry => entry.Trim())
+                .Where(entry => entry.Length > 0));
         }
 
         internal static void SaveDesktopDecision(
@@ -38,12 +71,16 @@ namespace FuryPlusPlus {
             if (string.IsNullOrEmpty(blueprintId)) return;
             try {
                 Directory.CreateDirectory(DirPath);
+                var compressor = CurrentCompressorInputs();
                 var data = new SavedData {
                     addonVersion = "0.1.0",
                     algorithmVersion = AlgorithmVersion,
                     strippedParams = strippedParams.OrderBy(name => name, StringComparer.Ordinal).ToList(),
                     narrowedParams = (narrowedParams ?? Enumerable.Empty<string>())
-                        .OrderBy(name => name, StringComparer.Ordinal).ToList()
+                        .OrderBy(name => name, StringComparer.Ordinal).ToList(),
+                    compressorLanePacking = compressor.LanePacking,
+                    compressorSub8List = compressor.Sub8List,
+                    compressorAlgoVersion = CompressorAlgoVersion
                 };
                 File.WriteAllText(FileFor(blueprintId), JsonUtility.ToJson(data, true));
             } catch (Exception e) {
@@ -87,7 +124,40 @@ namespace FuryPlusPlus {
                     "narrowed", out error)) {
                 return false;
             }
+
+            // Compressor inputs only matter when the compressor actually engages, which
+            // (on mobile) means VRCFury's own desktop sync file marked params compressed.
+            if (VrcfuryDesktopDataCompresses(blueprintId)) {
+                var current = CurrentCompressorInputs();
+                if (saved.compressorLanePacking != current.LanePacking
+                    || (saved.compressorSub8List ?? "") != current.Sub8List
+                    || (saved.compressorLanePacking || (saved.compressorSub8List ?? "") != "")
+                       && saved.compressorAlgoVersion != CompressorAlgoVersion) {
+                    error = "FuryPlusPlus compressor settings differ between the desktop upload and " +
+                            "this mobile build — the two platforms would derive different sync " +
+                            "layouts and desync. Desktop: lanePacking=" + saved.compressorLanePacking +
+                            $", sub8List='{saved.compressorSub8List}' (algo v{saved.compressorAlgoVersion}). " +
+                            $"This build: lanePacking={current.LanePacking}, sub8List='{current.Sub8List}' " +
+                            $"(algo v{CompressorAlgoVersion}). Match the settings, re-upload desktop " +
+                            "first, then build for mobile.";
+                    return false;
+                }
+            }
             return true;
+        }
+
+        /** True when VRCFury's own desktop sync file for this avatar compressed any param. */
+        private static bool VrcfuryDesktopDataCompresses(string blueprintId) {
+            try {
+                var path = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "VRCFury", "DesktopSyncData", blueprintId + ".json");
+                if (!File.Exists(path)) return false;
+                // Read-only peek at VRCFury's file (never written by FuryPlusPlus).
+                return File.ReadAllText(path).Contains("\"compressed\": true");
+            } catch {
+                return false;
+            }
         }
 
         private static bool SetsMatch(

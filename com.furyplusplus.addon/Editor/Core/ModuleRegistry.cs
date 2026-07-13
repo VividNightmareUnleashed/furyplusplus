@@ -64,6 +64,11 @@ namespace FuryPlusPlus {
             new DbtConsolidationModule(),
             new BlendshapeAutoEnableModule(),
             new NarrowIntParamsModule(),
+            // --- Compressor family; first Install wins the shared scope patch ---
+            new CompressorLanePackingModule(),
+            new CompressorSolverModule(),
+            new CompressorEligibilityModule(),
+            new CompressorSub8Module(),
         };
 
         private static readonly Dictionary<string, (ModuleState State, string Message)> Statuses =
