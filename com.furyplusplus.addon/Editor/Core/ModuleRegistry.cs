@@ -47,6 +47,7 @@ namespace FuryPlusPlus {
             new ProgressWindowThemeModule(),
             new LayerToTreeBindingIndexModule(),
             new CompressorMemoModule(),
+            new GetLayersMemoModule(),
             // --- Quality passes (post-build hook order) ---
             new StripUnusedParamsModule(),
             new FullScopeDbtModule(),
