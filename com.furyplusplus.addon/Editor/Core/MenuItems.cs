@@ -9,6 +9,19 @@ namespace FuryPlusPlus {
             SettingsWindow.Open();
         }
 
+        [MenuItem(Root + "Log last profile report", priority = 20)]
+        private static void LogLastReport() {
+            var report = FuryPlusPlusProfilerApi.LastReport;
+            if (string.IsNullOrEmpty(report)) {
+                report = SessionState.GetString("FuryPlusPlus.LastProfile", "");
+            }
+            if (string.IsNullOrEmpty(report)) {
+                Log.Info("No profile report captured yet — run a VRCFury bake first.");
+            } else {
+                UnityEngine.Debug.Log(report);
+            }
+        }
+
         [MenuItem(Root + "Disable all optimizations", priority = 40)]
         private static void DisableAll() {
             Settings.DisableAllModules();

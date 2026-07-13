@@ -72,6 +72,32 @@ namespace FuryPlusPlus {
                     }
                     EditorGUILayout.EndFoldoutHeaderGroup();
                 }
+
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Profiling", EditorStyles.boldLabel);
+                var detailed = EditorGUILayout.ToggleLeft(
+                    new GUIContent(
+                        "Detailed profiling",
+                        "Times VRCFury's hottest internals per bake. Installs the extra patches " +
+                        "immediately; turning it off sheds them on the next script reload."
+                    ),
+                    Settings.DetailedProfiling
+                );
+                if (detailed != Settings.DetailedProfiling) {
+                    Settings.DetailedProfiling = detailed;
+                    if (detailed) ProfilePatches.EnsureDetailedTargetsInstalled();
+                }
+                if (GUILayout.Button("Log last profile report", GUILayout.Width(180))) {
+                    var report = FuryPlusPlusProfilerApi.LastReport;
+                    if (string.IsNullOrEmpty(report)) {
+                        report = SessionState.GetString("FuryPlusPlus.LastProfile", "");
+                    }
+                    if (string.IsNullOrEmpty(report)) {
+                        Log.Info("No profile report captured yet — run a VRCFury bake first.");
+                    } else {
+                        Debug.Log(report);
+                    }
+                }
             }
 
             EditorGUILayout.EndScrollView();

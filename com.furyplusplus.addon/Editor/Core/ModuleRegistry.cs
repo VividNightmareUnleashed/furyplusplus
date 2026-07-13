@@ -22,6 +22,7 @@ namespace FuryPlusPlus {
          * here as they land; never auto-discover.
          */
         internal static readonly Module[] All = {
+            new ProfilingModule(),
         };
 
         private static readonly Dictionary<string, (ModuleState State, string Message)> Statuses =

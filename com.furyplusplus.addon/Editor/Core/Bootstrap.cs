@@ -44,6 +44,12 @@ namespace FuryPlusPlus {
             }
 
             Compat = compat;
+            try {
+                // Before modules install: their Install() calls RegisterBefore/After.
+                BuildPhaseHooks.Install(Harmony, compat);
+            } catch (Exception e) {
+                Log.Warn("Build phase hooks unavailable (dependent modules will fail closed): " + e.Message);
+            }
             ModuleRegistry.InstallAll(Harmony, compat);
         }
 
