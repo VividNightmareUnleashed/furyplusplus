@@ -28,8 +28,11 @@ installed VRCFury version is exactly `1.1363.0`. Each module also checks its own
 and stays disabled if they differ. This is deliberately fail-closed because VRCFury does not expose
 a public extension API for these bake internals.
 
-The package's VPM dependency is a minimum needed for installation resolution; it does not mean
-later VRCFury versions are compatible with the version-pinned modules.
+The package's VPM dependency pins VRCFury to the exact validated version, so the Creator
+Companion only installs and keeps the combination the version-pinned modules support — it will
+refuse to update VRCFury past the pin while FuryPlusPlus is installed. A from-disk install skips
+that resolution; any VRCFury version loads, and unsupported versions simply run with every
+version-pinned module disabled.
 
 ## Install
 
