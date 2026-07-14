@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.1 — 2026-07-14
+
+Distribution and metadata release; bake behavior is unchanged from 1.0.0. FuryPlusPlus is now
+installable through the VRChat Creator Companion, and the manifest pins VRCFury to the exact
+validated version so the Companion only installs and keeps combinations that actually work.
+
+- **Creator Companion support:** a hosted VPM listing at
+  https://vividnightmareunleashed.github.io/furyplusplus/ with an Add to VCC button; releases
+  now ship a VPM zip alongside the unitypackage, and the listing rebuilds automatically on every
+  release.
+- **Exact VRCFury pin:** the VPM dependency on `com.vrcfury.vrcfury` is now exactly `1.1363.0`
+  (was `>=`), so the Companion refuses to update VRCFury past the validated version while
+  FuryPlusPlus is installed. From-disk installs still load any version and fail closed as
+  before.
+- **Settings-window footer:** the window now shows the addon version and author credit, linking
+  to the GitHub page.
+- **License metadata:** the license is declared in the package manifest, and LICENSE.md,
+  NOTICE.md, and the README are mirrored at the repository root.
+
 ## 1.0.0 — 2026-07-14
 
 First full release: the output-quality passes join the ported speed patches, so FuryPlusPlus now
@@ -79,8 +98,6 @@ the warm bake from 12.6 s at 0.1.0 down to roughly 11–12 s (93.8 s stock). 44 
 - Internal consolidation: shared compat holders resolve each reflected member once, typed stats
   replace string parsing in the window, and estimator projections call the passes' own
   classification predicates.
-
-## 0.1.0 — 2026-07-13
 
 ## 0.1.0 — 2026-07-13
 

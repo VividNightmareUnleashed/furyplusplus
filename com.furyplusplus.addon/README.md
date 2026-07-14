@@ -11,7 +11,7 @@ patches. The two cannot run together: while QuickFury is installed, FuryPlusPlus
 QuickFury's patches each session and warns. Remove `com.quickfury.addon` (settings do not carry
 over).
 
-FuryPlusPlus 1.0.0 is tested against VRCFury 1.1363.0. On the reference avatar it reduced a warm
+FuryPlusPlus 1.0.1 is tested against VRCFury 1.1363.0. On the reference avatar it reduced a warm
 VRCFury bake from **93.8 seconds (stock) to 11–12 seconds**, and its output-quality passes cut
 the avatar's synced parameter data from **444 to 177 bits**.
 
