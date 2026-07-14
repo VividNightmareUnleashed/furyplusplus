@@ -22,7 +22,8 @@ namespace FuryPlusPlus {
      * Every failure here is a logged refusal that leaves the bake untouched.
      */
     internal static class BakeCacheSnapshotStore {
-        internal const int SnapshotFormatVersion = 1;
+        /** v2: containers are binary-serialized (text-YAML snapshots load far too slowly). */
+        internal const int SnapshotFormatVersion = 2;
         internal const string PackageName = "com.furyplusplus.bakecache";
         internal const string PackageAssetRoot = "Packages/" + PackageName;
         private const string SnapshotsFolder = PackageAssetRoot + "/Snapshots";
