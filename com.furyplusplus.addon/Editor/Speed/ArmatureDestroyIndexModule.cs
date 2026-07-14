@@ -14,16 +14,12 @@ namespace FuryPlusPlus {
      * snapshots those three ordered component sequences immediately before the first prune
      * and reuses them while preserving VRCFury's per-object filtering and destruction order.
      */
-    internal sealed class ArmatureDestroyIndexModule : Module {
-        internal static ArmatureDestroyIndexModule Instance { get; private set; }
-
-        internal ArmatureDestroyIndexModule() {
-            Instance = this;
-        }
+    internal sealed class ArmatureDestroyIndexModule : Module<ArmatureDestroyIndexModule> {
 
         internal override string Id => "armatureDestroyIndex";
         internal override string DisplayName => "Armature destroy index";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Armature & links";
         internal override string Description =>
             "Snapshots dynamics components once per phase instead of re-scanning per pruned object.";
 

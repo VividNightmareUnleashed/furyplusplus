@@ -2,7 +2,6 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using System.Text;
 using HarmonyLib;
 using UnityEditor;
@@ -18,21 +17,16 @@ namespace FuryPlusPlus {
      * separate without this.
      *
      * Conservative: only clips VRCFury generated or changed (GetUseOriginalUserClip == null)
-     * and non-proxy clips participate; hash covers every curve key (times, values, tangents,
-     * weights) plus the full AnimationClipSettings, so differing loop/length can never merge.
-     * First occurrence in controller/layer order wins.
+     * and non-proxy clips participate; the identity key is the shared ClipContentKey
+     * serialization (every curve key facet + full clip settings), so differing loop/length
+     * can never merge. First occurrence in controller/layer order wins.
      */
-    internal sealed class ClipDedupModule : Module {
-        internal static ClipDedupModule Instance { get; private set; }
-
-        internal ClipDedupModule() {
-            Instance = this;
-        }
-
+    internal sealed class ClipDedupModule : Module<ClipDedupModule> {
         internal override string Id => "clipDedup";
         internal override string DisplayName => "Deduplicate generated clips (controller-wide)";
         internal override ModuleKind Kind => ModuleKind.Quality;
         internal override CompatTier RequiredTier => CompatTier.ExactVersion;
+        internal override string SettingsGroup => "Animation clips";
         internal override string Description =>
             "Points identical VRCFury-generated animation clips at one shared instance " +
             "across all layers and blendtrees before assets are saved.";
@@ -45,55 +39,24 @@ namespace FuryPlusPlus {
         internal override string ReportStats() {
             return ClipDedupPass.LastStats;
         }
+
+        internal override (string Text, string Tooltip)? ReportGain(Estimators.Result? analysis) {
+            return ClipDedupPass.LastDuplicates > 0
+                ? ($"{ClipDedupPass.LastDuplicates} duplicate clips removed last bake", ClipDedupPass.LastStats)
+                : ((string, string)?)null;
+        }
     }
 
     internal static class ClipDedupPass {
         internal static string LastStats;
-
-        private static MethodInfo getAllUsedControllers;
-        private static FieldInfo vfControllerCtrlField;
-        private static MethodInfo getAllCurves;
-        private static MethodInfo isProxyClip;
-        private static MethodInfo getUseOriginalUserClip;
-        private static Type curveTupleType;
-        private static PropertyInfo curveIsFloat;
-        private static PropertyInfo curveFloatCurve;
-        private static PropertyInfo curveObjectCurve;
+        internal static int LastDuplicates;
 
         internal static void Resolve() {
-            var controllersServiceType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Service.ControllersService"), "VF.Service.ControllersService");
-            getAllUsedControllers = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(controllersServiceType, "GetAllUsedControllers",
-                    method => method.GetParameters().Length == 0),
-                "ControllersService.GetAllUsedControllers()");
-            vfControllerCtrlField = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Utils.Controller.VFController")
-                    ?.GetField("ctrl", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic),
-                "VFController.ctrl");
-
-            var clipExtType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Utils.AnimationClipExtensions"), "VF.Utils.AnimationClipExtensions");
-            getAllCurves = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(clipExtType, "GetAllCurves",
-                    method => method.GetParameters().Length == 1),
-                "AnimationClipExtensions.GetAllCurves(clip)");
-            isProxyClip = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(clipExtType, "IsProxyClip",
-                    method => method.GetParameters().Length == 1),
-                "AnimationClipExtensions.IsProxyClip(clip)");
-            getUseOriginalUserClip = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(clipExtType, "GetUseOriginalUserClip",
-                    method => method.GetParameters().Length == 1),
+            ClipCurveCompat.DemandCore();
+            ReflectionUtils.Demand(ClipCurveCompat.ControllerCtrlField, "VFController.ctrl");
+            ReflectionUtils.Demand(ClipCurveCompat.GetUseOriginalUserClip,
                 "AnimationClipExtensions.GetUseOriginalUserClip(clip)");
-
-            curveTupleType = ReflectionUtils.Demand(
-                getAllCurves.ReturnType.GetElementType(), "(EditorCurveBinding, FloatOrObjectCurve)");
-            var curveType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Utils.FloatOrObjectCurve"), "VF.Utils.FloatOrObjectCurve");
-            curveIsFloat = ReflectionUtils.Demand(curveType.GetProperty("IsFloat"), "FloatOrObjectCurve.IsFloat");
-            curveFloatCurve = ReflectionUtils.Demand(curveType.GetProperty("FloatCurve"), "FloatOrObjectCurve.FloatCurve");
-            curveObjectCurve = ReflectionUtils.Demand(curveType.GetProperty("ObjectCurve"), "FloatOrObjectCurve.ObjectCurve");
+            ReflectionUtils.Demand(ClipCurveCompat.CurveObjectCurve, "FloatOrObjectCurve.ObjectCurve");
         }
 
         internal static void Run() {
@@ -103,23 +66,25 @@ namespace FuryPlusPlus {
             // Discover canonical clips in deterministic controller/layer order.
             var canonicalByHash = new Dictionary<string, AnimationClip>(StringComparer.Ordinal);
             var replacement = new Dictionary<AnimationClip, AnimationClip>();
-            var managers = ((IEnumerable)getAllUsedControllers.Invoke(controllersService, null))
+            var managers = ((IEnumerable)ClipCurveCompat.GetAllUsedControllers
+                    .Invoke(controllersService, null))
                 .Cast<object>().ToList();
             var controllers = managers
-                .Select(manager => vfControllerCtrlField.GetValue(manager) as AnimatorController)
+                .Select(ClipCurveCompat.RawController)
                 .Where(controller => controller != null)
                 .ToList();
 
             void Discover(AnimationClip clip) {
                 if (clip == null || replacement.ContainsKey(clip)) return;
-                if ((bool)isProxyClip.Invoke(null, new object[] { clip })) return;
-                if (getUseOriginalUserClip.Invoke(null, new object[] { clip }) != null) return;
+                if (ClipCurveCompat.IsProxyClip(clip)) return;
+                if (ClipCurveCompat.GetUseOriginalUserClip.Invoke(null, new object[] { clip }) != null) return;
                 string hash;
                 try {
                     hash = HashClip(clip);
                 } catch {
                     return; // unhashable clip: leave it alone
                 }
+                if (hash == null) return;
                 if (canonicalByHash.TryGetValue(hash, out var canonical)) {
                     if (!ReferenceEquals(canonical, clip)) replacement[clip] = canonical;
                 } else {
@@ -145,6 +110,7 @@ namespace FuryPlusPlus {
 
             if (replacement.Count == 0) {
                 LastStats = null;
+                LastDuplicates = 0;
                 return;
             }
 
@@ -165,6 +131,7 @@ namespace FuryPlusPlus {
 
             Log.Info($"Deduplicated {replacement.Count} identical generated clip(s) " +
                      $"({repointed} reference(s) repointed).");
+            LastDuplicates = replacement.Count;
             LastStats = $"duplicates={replacement.Count} repointed={repointed}";
         }
 
@@ -196,57 +163,20 @@ namespace FuryPlusPlus {
             return repointed;
         }
 
+        /** Null = the clip cannot be hashed faithfully; leave it out of the dedup. */
         private static string HashClip(AnimationClip clip) {
             var builder = new StringBuilder();
+            ClipContentKey.AppendClipFacts(builder, clip);
 
-            var settings = AnimationUtility.GetAnimationClipSettings(clip);
-            foreach (var field in settings.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public)
-                         .OrderBy(field => field.Name, StringComparer.Ordinal)) {
-                var value = field.GetValue(settings);
-                builder.Append(field.Name).Append('=')
-                    .Append(value is UnityEngine.Object obj ? obj.GetInstanceID().ToString() : value?.ToString())
-                    .Append(';');
+            var entries = new List<(EditorCurveBinding Binding, object Curve)>();
+            foreach (var entry in ClipCurveCompat.AllCurvesOf(clip)) {
+                entries.Add((ClipCurveCompat.TupleBinding(entry), ClipCurveCompat.TupleCurve(entry)));
             }
-            builder.Append("fr=").Append(clip.frameRate).Append('|');
-
-            var entries = new List<string>();
-            var curves = (Array)getAllCurves.Invoke(null, new object[] { clip });
-            foreach (var entry in curves) {
-                var binding = (EditorCurveBinding)curveTupleType.GetField("Item1").GetValue(entry);
-                var curve = curveTupleType.GetField("Item2").GetValue(entry);
-                var sb = new StringBuilder();
-                sb.Append(binding.path).Append('')
-                  .Append(binding.type?.FullName).Append('')
-                  .Append(binding.propertyName).Append('');
-                if (curve == null) {
-                    sb.Append("null");
-                } else if ((bool)curveIsFloat.GetValue(curve)) {
-                    var floatCurve = (AnimationCurve)curveFloatCurve.GetValue(curve);
-                    sb.Append("F:").Append(floatCurve.preWrapMode).Append(',').Append(floatCurve.postWrapMode);
-                    foreach (var key in floatCurve.keys) {
-                        sb.Append('(').Append(key.time.ToString("R")).Append(',')
-                          .Append(key.value.ToString("R")).Append(',')
-                          .Append(key.inTangent.ToString("R")).Append(',')
-                          .Append(key.outTangent.ToString("R")).Append(',')
-                          .Append(key.inWeight.ToString("R")).Append(',')
-                          .Append(key.outWeight.ToString("R")).Append(',')
-                          .Append((int)key.weightedMode).Append(')');
-                    }
-                } else {
-                    var objectCurve = (ObjectReferenceKeyframe[])curveObjectCurve.GetValue(curve);
-                    sb.Append("O:");
-                    if (objectCurve != null) {
-                        foreach (var key in objectCurve) {
-                            sb.Append('(').Append(key.time.ToString("R")).Append(',')
-                              .Append(key.value == null ? 0 : key.value.GetInstanceID()).Append(')');
-                        }
-                    }
-                }
-                entries.Add(sb.ToString());
+            ClipContentKey.SortByBinding(entries, entry => entry.Binding);
+            foreach (var entry in entries) {
+                if (!ClipContentKey.TryAppendCurve(builder, entry.Binding, entry.Curve)) return null;
             }
-            entries.Sort(StringComparer.Ordinal);
-            foreach (var entry in entries) builder.Append(entry).Append('');
-            return builder.ToString();
+            return Hash128.Compute(builder.ToString()).ToString();
         }
     }
 }

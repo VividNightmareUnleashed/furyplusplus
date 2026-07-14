@@ -11,16 +11,12 @@ namespace FuryPlusPlus {
      * Preserve the later AddPlug rejection, but avoid the multi-second mesh bake when
      * the renderer is already above/below an existing or newly unbaked plug.
      */
-    internal sealed class SpsCoveredRendererModule : Module {
-        internal static SpsCoveredRendererModule Instance { get; private set; }
-
-        internal SpsCoveredRendererModule() {
-            Instance = this;
-        }
+    internal sealed class SpsCoveredRendererModule : Module<SpsCoveredRendererModule> {
 
         internal override string Id => "spsCoveredRenderer";
         internal override string DisplayName => "Covered SPS mesh probe skip";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "SPS";
         internal override string Description =>
             "Skips SPS mesh-size probe bakes for renderers already covered by an existing plug.";
 
@@ -31,6 +27,13 @@ namespace FuryPlusPlus {
         internal override string ReportStats() {
             var stats = SpsCoveredRendererPatch.LastStats;
             return stats == "none" ? null : stats;
+        }
+
+        internal override (string Text, string Tooltip)? ReportGain(Estimators.Result? analysis) {
+            return SpsCoveredRendererPatch.LastSkipped > 0
+                ? ($"{SpsCoveredRendererPatch.LastSkipped}/{SpsCoveredRendererPatch.LastProbes} " +
+                   "SPS probes skipped last bake", SpsCoveredRendererPatch.LastStats)
+                : ((string, string)?)null;
         }
     }
 
@@ -48,6 +51,8 @@ namespace FuryPlusPlus {
         [ThreadStatic] private static Context active;
         private static Type plugComponentType;
         internal static string LastStats { get; private set; } = "none";
+        internal static int LastSkipped { get; private set; }
+        internal static int LastProbes { get; private set; }
 
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
             var upgraderType = ReflectionUtils.FindType("VF.Builder.Haptics.SpsUpgrader");
@@ -100,7 +105,11 @@ namespace FuryPlusPlus {
         }
 
         private static Exception End(Exception __exception) {
-            if (active != null) LastStats = active.Skipped + "/" + active.Probes;
+            if (active != null) {
+                LastStats = active.Skipped + "/" + active.Probes;
+                LastSkipped = active.Skipped;
+                LastProbes = active.Probes;
+            }
             active = null;
             return __exception;
         }

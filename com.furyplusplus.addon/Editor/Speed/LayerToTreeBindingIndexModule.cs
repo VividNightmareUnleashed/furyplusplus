@@ -19,16 +19,12 @@ namespace FuryPlusPlus {
      * impossible (same binding instances and equality), and enumeration preserves insertion
      * order so the DoNotOptimizeException messages and debug report stay string-identical.
      */
-    internal sealed class LayerToTreeBindingIndexModule : Module {
-        internal static LayerToTreeBindingIndexModule Instance { get; private set; }
-
-        internal LayerToTreeBindingIndexModule() {
-            Instance = this;
-        }
+    internal sealed class LayerToTreeBindingIndexModule : Module<LayerToTreeBindingIndexModule> {
 
         internal override string Id => "layerToTreeBindingIndex";
         internal override string DisplayName => "Layer-to-tree binding index";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Controllers & animation";
         internal override string Description =>
             "Replaces the quadratic shared-binding scan in VRCFury's layer-to-blendtree pass " +
             "with an inverted binding index.";
@@ -67,11 +63,10 @@ namespace FuryPlusPlus {
 
     internal static class LayerToTreeBindingIndexPatch {
         /**
-         * The layer whose OptimizeLayer call is currently executing, plus its own binding
-         * set — consumed by the off-side elimination module (it must not treat the
-         * candidate's own on-clip writes as conflicting). Null outside the loop.
+         * The binding set of the layer whose OptimizeLayer call is currently executing —
+         * consumed by the off-side elimination module (it must not treat the candidate's
+         * own on-clip writes as conflicting). Null outside the loop.
          */
-        internal static object CurrentCandidateLayer { get; private set; }
         internal static ICollection<EditorCurveBinding> CurrentCandidateBindings { get; private set; }
 
         private static FieldInfo globalsField;
@@ -120,31 +115,22 @@ namespace FuryPlusPlus {
                 ReflectionUtils.FindType("VF.Service.GlobalsService")?.GetField("allFeaturesInRun", any),
                 "GlobalsService.allFeaturesInRun");
 
-            getFx = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(controllersServiceType, "GetFx",
-                    method => method.GetParameters().Length == 0),
-                "ControllersService.GetFx()");
-            // GetLayers is declared on the VFController base; FindUniqueMethod is DeclaredOnly.
-            getLayers = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(vfControllerType, "GetLayers",
-                    method => method.GetParameters().Length == 0),
-                "VFController.GetLayers()");
+            ToggleTreeCompat.EnsureResolved();
+            getFx = ReflectionUtils.Demand(ToggleTreeCompat.GetFx, "ControllersService.GetFx()");
+            getLayers = ReflectionUtils.Demand(ToggleTreeCompat.GetLayers, "VFController.GetLayers()");
             getManagedLayers = ReflectionUtils.Demand(
                 ReflectionUtils.FindUniqueMethod(managerType, "GetManagedLayers",
                     method => method.GetParameters().Length == 0),
                 "ControllerManager.GetManagedLayers()");
             getBindingsAnimatedInLayer = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(serviceType, "GetBindingsAnimatedInLayer",
-                    method => method.GetParameters().Length == 1),
+                ToggleTreeCompat.GetBindingsAnimatedInLayer,
                 "LayerToTreeService.GetBindingsAnimatedInLayer(VFLayer)");
             optimizeLayer = ReflectionUtils.Demand(
                 ReflectionUtils.FindUniqueMethod(serviceType, "OptimizeLayer",
                     method => method.GetParameters().Length == 3),
                 "LayerToTreeService.OptimizeLayer(...)");
-            layerRemove = ReflectionUtils.Demand(
-                ReflectionUtils.FindNoArgVoid(layerType, "Remove"), "VFLayer.Remove()");
-            layerNameProperty = ReflectionUtils.Demand(
-                layerType.GetProperty("name", any), "VFLayer.name");
+            layerRemove = ReflectionUtils.Demand(ToggleTreeCompat.LayerRemove, "VFLayer.Remove()");
+            layerNameProperty = ReflectionUtils.Demand(ToggleTreeCompat.LayerName, "VFLayer.name");
             dbtCreate = ReflectionUtils.Demand(
                 ReflectionUtils.FindUniqueMethod(dbtServiceType, "Create",
                     method => method.GetParameters().Length == 1
@@ -230,11 +216,7 @@ namespace FuryPlusPlus {
                     addOrdered.Invoke(bindingsDict, new[] { layer, bindings });
                     bindingsByLayerLocal[layer] = bindings;
                     foreach (var binding in bindings) {
-                        if (!invertedIndex.TryGetValue(binding, out var list)) {
-                            list = new List<object>();
-                            invertedIndex[binding] = list;
-                        }
-                        list.Add(layer);
+                        invertedIndex.GetOrAddList(binding).Add(layer);
                     }
                 }
 
@@ -265,7 +247,6 @@ namespace FuryPlusPlus {
                 untypedFilterField.SetValue(bindingsDict,
                     relevant == null ? (Func<object, bool>)null : relevant.Contains);
                 var layerName = layerNameProperty.GetValue(layer);
-                CurrentCandidateLayer = layer;
                 bindingsByLayerLocal.TryGetValue(layer, out var candidateBindings);
                 CurrentCandidateBindings = candidateBindings;
                 try {
@@ -276,11 +257,9 @@ namespace FuryPlusPlus {
                     when (wrapped.InnerException?.GetType().Name == "DoNotOptimizeException") {
                     debugLog.Add($"{layerName} - Not Optimizing ({wrapped.InnerException.Message})");
                 } catch (TargetInvocationException wrapped) when (wrapped.InnerException != null) {
-                    CurrentCandidateLayer = null;
                     CurrentCandidateBindings = null;
                     ExceptionDispatchInfo.Capture(wrapped.InnerException).Throw();
                 } finally {
-                    CurrentCandidateLayer = null;
                     CurrentCandidateBindings = null;
                 }
             }

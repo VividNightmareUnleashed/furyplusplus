@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
-using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEngine;
 
@@ -31,7 +30,12 @@ namespace FuryPlusPlus {
             internal ModuleKind Kind;
             internal string Title;
             internal string Note;
-            internal (string Title, string[] Ids)[] Groups;
+            /**
+             * Curated display order of group titles. Membership is declared by each module
+             * (Module.SettingsGroup) — the tab only orders; unknown groups append after,
+             * ungrouped modules land in "Other".
+             */
+            internal string[] GroupOrder;
         }
 
         private static readonly TabDef[] Tabs = {
@@ -40,54 +44,28 @@ namespace FuryPlusPlus {
                 Note = "Output-identical bake speedups. The header above shows your last measured bake " +
                        "— use Benchmark for a true before/after; modules that count their own " +
                        "work show it in green.",
-                Groups = new[] {
-                    ("Armature & links", new[] {
-                        "armatureConstraintIndex", "armaturePhysboneIndex", "armatureSkinIndex",
-                        "armatureDestroyIndex", "skipArmatureDebugInfo", "fastArmatureMove",
-                    }),
-                    ("Paths & rewriting", new[] { "orderedPathRewrite", "mergePathCache" }),
-                    ("Asset saving", new[] {
-                        "saveAssetsDiscovery", "saveAssetsBatching", "consolidatedAssetContainer",
-                        "fastControllerAssetGraph",
-                    }),
-                    ("Controllers & animation", new[] {
-                        "controllerParameterIndex", "getLayersMemo", "animatorIteratorMemo",
-                        "layerToTreeLayerIndex", "layerToTreeBindingIndex", "trackingBehaviourIndex",
-                        "behaviourContainerFilter", "compressorMemo", "blendshapeBindingCache",
-                        "blendshapeBakeRewrite",
-                    }),
-                    ("SPS", new[] { "spsCoveredRenderer", "spsMaterialProbeCache" }),
-                    ("Play-mode iteration", new[] { "playModeSkips", "playModeNoDiskSave", "bakeCacheDryRun", "bakeCacheReplay" }),
+                GroupOrder = new[] {
+                    "Armature & links", "Paths & rewriting", "Asset saving",
+                    "Controllers & animation", "SPS", "Play-mode iteration",
                 },
             },
             new TabDef {
                 Kind = ModuleKind.Quality, Title = "Quality",
                 Note = "Changes the bake output: fewer animator layers, fewer sync bits.",
-                Groups = new[] {
-                    ("Animator layers", new[] {
-                        "fullScopeDbt", "offSideElimination", "toggleSeparateLocal", "toggleFadeTrees",
-                        "dbtConsolidation",
-                    }),
-                    ("Animation clips", new[] { "noOpCurveStrip", "clipDedup" }),
-                    ("Parameter compressor (sync bits)", new[] {
-                        "compressorLanePacking", "compressorSolver", "compressorEligibility", "compressorSub8",
-                    }),
+                GroupOrder = new[] {
+                    "Animator layers", "Animation clips", "Parameter compressor (sync bits)",
                 },
             },
             new TabDef {
                 Kind = ModuleKind.Pass, Title = "Passes",
                 Note = "Standalone SDK preprocessor passes that run on the finished avatar — " +
                        "version-pinned like everything else.",
-                Groups = new[] {
-                    ("Synced parameters", new[] { "stripUnusedParams", "narrowIntParams" }),
-                },
+                GroupOrder = new[] { "Synced parameters" },
             },
             new TabDef {
                 Kind = ModuleKind.Cosmetic, Title = "Extras",
                 Note = "Editor visuals and diagnostics; never affects the bake output.",
-                Groups = new[] {
-                    ("Editor visuals", new[] { "progressWindowTheme", "progressPump", "profiling" }),
-                },
+                GroupOrder = new[] { "Editor visuals" },
             },
         };
 
@@ -114,6 +92,23 @@ namespace FuryPlusPlus {
         [SerializeField] private VRC.SDK3.Avatars.Components.VRCAvatarDescriptor estimateTarget;
         private bool autoPickedTarget;
         private Estimators.Result? analysis;
+
+        // Bake history parsed once per recorded bake, not per GUI event (the phase
+        // breakdown is a multi-KB prefs string).
+        private int bakeCacheVersion = -1;
+        private BakeHistory.Record? lastBake;
+        private BakeHistory.Record? stockBaseline;
+        private List<(string Name, double Ms)> cachedLastPhases;
+        private List<(string Name, double Ms)> cachedStockPhases;
+
+        private void EnsureBakeHistoryCache() {
+            if (bakeCacheVersion == BakeHistory.Version) return;
+            bakeCacheVersion = BakeHistory.Version;
+            lastBake = BakeHistory.LastBake;
+            stockBaseline = BakeHistory.StockBaseline;
+            cachedLastPhases = BakeHistory.LastPhases();
+            cachedStockPhases = BakeHistory.StockPhases();
+        }
 
         internal static void Open() {
             var window = GetWindow<SettingsWindow>(utility: false, title: "FuryPlusPlus", focus: true);
@@ -227,31 +222,38 @@ namespace FuryPlusPlus {
                 EditorGUILayout.Space(4);
             }
 
-            // Registry is the source of truth: anything this tab's curated groups don't
-            // mention still shows up under "Other" instead of silently disappearing.
-            var remaining = ModuleRegistry.ByKind(def.Kind).ToList();
-            foreach (var (title, ids) in def.Groups) {
-                var modules = ids
-                    .Select(ModuleRegistry.Find)
-                    .Where(module => module != null && remaining.Remove(module))
-                    .ToList();
-                if (modules.Count == 0) continue;
-                EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
-                foreach (var module in modules) DrawModule(module);
-                EditorGUILayout.Space(6);
+            // Modules declare their own group; the registry is the source of truth, so a
+            // module with an uncurated (or no) group still shows up instead of vanishing.
+            var byGroup = new Dictionary<string, List<Module>>(StringComparer.Ordinal);
+            var groupTitles = new List<string>();
+            foreach (var module in ModuleRegistry.ByKind(def.Kind)) {
+                var title = module.SettingsGroup ?? "Other";
+                if (!byGroup.ContainsKey(title)) groupTitles.Add(title);
+                byGroup.GetOrAddList(title).Add(module);
             }
-            if (remaining.Count > 0) {
-                EditorGUILayout.LabelField("Other", EditorStyles.boldLabel);
-                foreach (var module in remaining) DrawModule(module);
+            // OrderBy is stable: uncurated groups keep their registry order.
+            groupTitles = groupTitles.OrderBy(title => GroupRank(def, title)).ToList();
+
+            foreach (var title in groupTitles) {
+                EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
+                foreach (var module in byGroup[title]) DrawModule(module);
                 EditorGUILayout.Space(6);
             }
 
             if (def.Kind == ModuleKind.Cosmetic) DrawDiagnostics();
         }
 
+        /** Curated groups first (in declared order), then unknown groups, "Other" last. */
+        private static int GroupRank(TabDef def, string title) {
+            var index = Array.IndexOf(def.GroupOrder, title);
+            if (index >= 0) return index;
+            return title == "Other" ? int.MaxValue : def.GroupOrder.Length;
+        }
+
         // ---- Header: avatar analysis stat cards + measured bake times -----------------
 
         private void DrawHeader() {
+            EnsureBakeHistoryCache();
             if (estimateTarget == null && !autoPickedTarget) {
                 autoPickedTarget = true;
                 estimateTarget = RestoreTarget()
@@ -348,7 +350,7 @@ namespace FuryPlusPlus {
                 GUILayout.Label("FX layers", EditorStyles.miniLabel);
                 var a = analysis;
                 GUILayout.Label(a?.FxLayers >= 0 ? a.Value.FxLayers.ToString() : "—", valueStyle);
-                var merged = StatOf("dbtConsolidation", @"mergedLayers=(\d+)");
+                var merged = DbtConsolidationPass.LastMergedLayers;
                 if (merged > 0) {
                     GUILayout.Label(new GUIContent($"-{merged} merged last bake",
                         "Direct-blendtree layers consolidated into one during the last bake."), deltaStyle);
@@ -366,8 +368,8 @@ namespace FuryPlusPlus {
         private void DrawLastBakeCard(float width) {
             using (Card(width)) {
                 GUILayout.Label("Last bake", EditorStyles.miniLabel);
-                var last = BakeHistory.LastBake;
-                var stock = BakeHistory.StockBaseline;
+                var last = lastBake;
+                var stock = stockBaseline;
                 if (last.HasValue) {
                     GUILayout.Label(new GUIContent(FormatMs(last.Value.TotalMs),
                         $"{AvatarLeaf(last.Value.Avatar)} — {last.Value.Date}"), valueStyle);
@@ -400,9 +402,7 @@ namespace FuryPlusPlus {
                 }
                 GUILayout.FlexibleSpace();
                 if (!BakeHistory.BenchmarkPending) {
-                    var profiling = ProfilingModule.Instance;
-                    var canBenchmark = Settings.MasterEnabled && profiling != null
-                                       && ModuleRegistry.IsActive(profiling) && profiling.Enabled;
+                    var canBenchmark = ModuleRegistry.IsOn(ProfilingModule.Instance);
                     using (new EditorGUI.DisabledScope(!canBenchmark)) {
                         if (GUILayout.Button(new GUIContent("Benchmark",
                                 canBenchmark
@@ -460,18 +460,14 @@ namespace FuryPlusPlus {
         }
 
         private void DrawBakeBreakdown() {
-            var last = BakeHistory.LastBake;
-            var stock = BakeHistory.StockBaseline;
+            var last = lastBake;
+            var stock = stockBaseline;
             // The baseline overlays when it is comparable (same avatar as the last normal
             // bake) or when it is the only bake recorded so far (a fresh benchmark).
             var stockUsable = stock.HasValue
                               && (!last.HasValue || stock.Value.Avatar == last.Value.Avatar);
-            var newPhases = last.HasValue
-                ? BakeHistory.LastPhases()
-                : new List<(string Name, double Ms)>();
-            var stockPhases = stockUsable
-                ? BakeHistory.StockPhases()
-                : new List<(string Name, double Ms)>();
+            var newPhases = last.HasValue ? cachedLastPhases : new List<(string Name, double Ms)>();
+            var stockPhases = stockUsable ? cachedStockPhases : new List<(string Name, double Ms)>();
             if (newPhases.Count == 0 && stockPhases.Count == 0) return;
             var open = SessionState.GetBool(BreakdownKey, false);
             var newOpen = EditorGUILayout.Foldout(open,
@@ -675,16 +671,6 @@ namespace FuryPlusPlus {
             return slash < 0 ? path : path.Substring(slash + 1);
         }
 
-        /** Like Stat, but by module id and hardened against a throwing stats formatter. */
-        private static int StatOf(string moduleId, string pattern) {
-            try {
-                var module = ModuleRegistry.Find(moduleId);
-                return module == null ? -1 : Stat(module, pattern);
-            } catch {
-                return -1;
-            }
-        }
-
         private static void DrawStatusBanner() {
             var compat = Bootstrap.Compat;
             if (compat != null) {
@@ -738,7 +724,7 @@ namespace FuryPlusPlus {
                 }
             }
 
-            if (module.Options.Count > 0) {
+            if (module.Options.Count > 0 || module.ListOptions.Count > 0) {
                 using (new EditorGUI.IndentLevelScope()) {
                     using (new EditorGUI.DisabledScope(!installed)) {
                         foreach (var option in module.Options) {
@@ -749,23 +735,17 @@ namespace FuryPlusPlus {
                             );
                             if (toggled != value) Settings.SetOptionEnabled(module, option, toggled);
                         }
+                        foreach (var option in module.ListOptions) {
+                            var value = Settings.GetListOption(module, option);
+                            var updated = EditorGUILayout.DelayedTextField(
+                                new GUIContent(option.Label, option.Description), value);
+                            if (updated != value) Settings.SetListOption(module, option, updated);
+                        }
                     }
                 }
             }
 
-            if (module.Id == "bakeCacheReplay" && installed) {
-                using (new EditorGUILayout.HorizontalScope()) {
-                    GUILayout.Space(18f);
-                    if (GUILayout.Button(
-                            new GUIContent("Clear bake cache",
-                                "Deletes every cached snapshot and fingerprint record; the next " +
-                                "play-mode bake starts from scratch."),
-                            GUILayout.Width(130f))) {
-                        BakeCacheSnapshotStore.ClearAll();
-                    }
-                    GUILayout.FlexibleSpace();
-                }
-            }
+            if (installed) module.DrawExtraSettings();
         }
 
         private void DrawDiagnostics() {
@@ -783,174 +763,21 @@ namespace FuryPlusPlus {
                 if (detailed) ProfilePatches.EnsureDetailedTargetsInstalled();
             }
             if (GUILayout.Button("Log last profile report", GUILayout.Width(180))) {
-                var report = FuryPlusPlusProfilerApi.LastReport;
-                if (string.IsNullOrEmpty(report)) {
-                    report = SessionState.GetString("FuryPlusPlus.LastProfile", "");
-                }
-                if (string.IsNullOrEmpty(report)) {
-                    Log.Info("No profile report captured yet — run a VRCFury bake first.");
-                } else {
-                    Debug.Log(report);
-                }
+                FuryPlusPlusProfilerApi.LogLastReport();
             }
         }
 
         // ---- Gain chips -------------------------------------------------------------
 
-        private struct Chip {
-            internal string Text;
-            internal string Tooltip;
-        }
-
-        private static Chip? MakeChip(string text, string tooltip) {
-            return new Chip { Text = text, Tooltip = tooltip };
-        }
-
-        private static string N(int value) {
-            return value.ToString("N0", CultureInfo.InvariantCulture);
-        }
-
-        /** First capture of `pattern` in the module's last-bake stats, or -1. */
-        private static int Stat(Module module, string pattern) {
-            var stats = module.ReportStats();
-            if (string.IsNullOrEmpty(stats)) return -1;
-            var match = Regex.Match(stats, pattern);
-            return match.Success && int.TryParse(match.Groups[1].Value, out var value) ? value : -1;
-        }
-
-        private Chip? GainChip(Module module) {
+        /**
+         * Each module owns its chip (Module.ReportGain, next to the typed counters its
+         * ReportStats formats); the window only renders and hardens the call.
+         */
+        private (string Text, string Tooltip)? GainChip(Module module) {
             try {
-                return GainChipUnsafe(module);
+                return module.ReportGain(analysis);
             } catch {
-                return null; // a malformed stats string must never break the window
-            }
-        }
-
-        private Chip? GainChipUnsafe(Module module) {
-            var a = analysis;
-            switch (module.Id) {
-                case "stripUnusedParams": {
-                        if (a?.StrippableBits > 0) {
-                            return MakeChip($"-{a.Value.StrippableBits} sync bits",
-                                $"{a.Value.StrippableParams} unused synced parameter(s) on the analyzed avatar.");
-                        }
-                        var bits = Stat(module, @"bits=(\d+)");
-                        return bits > 0 ? MakeChip($"-{bits} sync bits last bake", module.ReportStats()) : null;
-                    }
-                case "narrowIntParams": {
-                        if (a?.NarrowableInts > 0) {
-                            return MakeChip($"-{a.Value.NarrowableInts * 7} sync bits",
-                                $"{a.Value.NarrowableInts} 0/1 Int parameter(s) narrowable to Bool (7 bits each).");
-                        }
-                        var bits = Stat(module, @"bits=(\d+)");
-                        return bits > 0 ? MakeChip($"-{bits} sync bits last bake", module.ReportStats()) : null;
-                    }
-                case "fullScopeDbt":
-                    return a?.FxLayers > 1
-                        ? MakeChip($"{a.Value.FxLayers} FX layers → blendtree",
-                            "Eligible toggle layers merge into a single direct-blendtree layer; " +
-                            "the exact count depends on per-layer eligibility.")
-                        : null;
-                case "dbtConsolidation": {
-                        var merged = Stat(module, @"mergedLayers=(\d+)");
-                        return merged > 0 ? MakeChip($"-{merged} layers last bake", module.ReportStats()) : null;
-                    }
-                case "noOpCurveStrip": {
-                        var curves = Stat(module, @"curves=(\d+)");
-                        return curves > 0 ? MakeChip($"{N(curves)} curves stripped last bake", module.ReportStats()) : null;
-                    }
-                case "clipDedup": {
-                        var duplicates = Stat(module, @"duplicates=(\d+)");
-                        return duplicates > 0
-                            ? MakeChip($"{duplicates} duplicate clips removed last bake", module.ReportStats())
-                            : null;
-                    }
-                case "offSideElimination": {
-                        var upgraded = Stat(module, @"oneSided=(\d+)");
-                        return upgraded > 0 ? MakeChip($"{upgraded} toggles one-sided last bake", module.ReportStats()) : null;
-                    }
-                case "toggleSeparateLocal": {
-                        var converted = Stat(module, @"converted=(\d+)");
-                        return converted > 0
-                            ? MakeChip($"{converted} toggles → blendtree last bake", module.ReportStats())
-                            : null;
-                    }
-                case "toggleFadeTrees": {
-                        var converted = Stat(module, @"converted=(\d+)");
-                        return converted > 0
-                            ? MakeChip($"{converted} fade toggles converted last bake", module.ReportStats())
-                            : null;
-                    }
-                case "compressorLanePacking": {
-                        var stats = module.ReportStats();
-                        if (string.IsNullOrEmpty(stats)) return null;
-                        var batches = Regex.Match(stats, @"batches=(\d+)->(\d+)");
-                        if (!batches.Success) return null;
-                        var before = int.Parse(batches.Groups[1].Value);
-                        var after = int.Parse(batches.Groups[2].Value);
-                        return before > after
-                            ? MakeChip($"sync rounds {before} → {after} last bake", stats)
-                            : null;
-                    }
-                case "compressorSolver": {
-                        var batches = Stat(module, @"^(\d+) batches per sync");
-                        return batches > 0
-                            ? MakeChip($"{batches} batches per sync last bake", module.ReportStats())
-                            : null;
-                    }
-                case "compressorEligibility": {
-                        var added = Stat(module, @"extraParams=(\d+)");
-                        return added > 0
-                            ? MakeChip($"+{added} params compressed last bake", module.ReportStats())
-                            : null;
-                    }
-                case "compressorSub8": {
-                        var pairs = Stat(module, @"packedPairs=(\d+)");
-                        return pairs > 0
-                            ? MakeChip($"{pairs} float pairs → 4 bits last bake", module.ReportStats())
-                            : null;
-                    }
-                case "playModeNoDiskSave": {
-                        var skipped = Stat(module, @"skippedWrites=(\d+)");
-                        return skipped > 0
-                            ? MakeChip($"{N(skipped)} disk writes skipped last bake", module.ReportStats())
-                            : null;
-                    }
-                case "bakeCacheDryRun": {
-                        var hits = Stat(module, @"wouldHit=(\d+)");
-                        var misses = Stat(module, @"wouldMiss=(\d+)");
-                        return hits >= 0 && misses >= 0 && hits + misses > 0
-                            ? MakeChip($"would hit {hits}/{hits + misses} bakes",
-                                "How often an incremental bake cache could have skipped the bake.")
-                            : null;
-                    }
-                case "bakeCacheReplay": {
-                        var stats = module.ReportStats();
-                        if (string.IsNullOrEmpty(stats)) return null;
-                        var match = Regex.Match(stats, @"replays=(\d+) savedSeconds=([\d.]+)");
-                        return match.Success && int.Parse(match.Groups[1].Value) > 0
-                            ? MakeChip($"replayed {match.Groups[1].Value} bakes (~{match.Groups[2].Value}s saved)",
-                                "Play-mode bakes skipped by restoring the cached processed avatar.")
-                            : null;
-                    }
-                case "behaviourContainerFilter": {
-                        var stats = module.ReportStats();
-                        if (string.IsNullOrEmpty(stats)) return null;
-                        var ratio = Regex.Match(stats, @"=(\d+)/(\d+)");
-                        return ratio.Success && int.Parse(ratio.Groups[1].Value) > 0
-                            ? MakeChip($"{ratio.Groups[1].Value}/{ratio.Groups[2].Value} layer scans skipped last bake", stats)
-                            : null;
-                    }
-                case "spsCoveredRenderer": {
-                        var stats = module.ReportStats();
-                        if (string.IsNullOrEmpty(stats)) return null;
-                        var ratio = Regex.Match(stats, @"^(\d+)/(\d+)$");
-                        return ratio.Success && int.Parse(ratio.Groups[1].Value) > 0
-                            ? MakeChip($"{ratio.Groups[1].Value}/{ratio.Groups[2].Value} SPS probes skipped last bake", stats)
-                            : null;
-                    }
-                default:
-                    return null;
+                return null; // a module's stats must never break the window
             }
         }
     }

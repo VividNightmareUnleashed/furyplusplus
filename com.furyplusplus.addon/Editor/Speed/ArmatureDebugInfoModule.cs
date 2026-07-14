@@ -8,16 +8,12 @@ namespace FuryPlusPlus {
      * carried through pruning, component enumeration and NDMF cloning. Suppress them
      * only for the Armature Link action; runtime bake output is unchanged.
      */
-    internal sealed class ArmatureDebugInfoModule : Module {
-        internal static ArmatureDebugInfoModule Instance { get; private set; }
-
-        internal ArmatureDebugInfoModule() {
-            Instance = this;
-        }
+    internal sealed class ArmatureDebugInfoModule : Module<ArmatureDebugInfoModule> {
 
         internal override string Id => "skipArmatureDebugInfo";
         internal override string DisplayName => "Armature debug-component suppression";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Armature & links";
         internal override string Description =>
             "Skips VRCFuryDebugInfo components on merged bones in preview builds; upload output is unchanged.";
 
@@ -31,12 +27,8 @@ namespace FuryPlusPlus {
         [ThreadStatic] private static bool suppress;
 
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
-            var uploadHookType = ReflectionUtils.FindType("VF.Hooks.IsActuallyUploadingHook");
-            var get = ReflectionUtils.FindUniqueMethod(
-                uploadHookType,
-                "Get",
-                method => method.ReturnType == typeof(bool) && method.GetParameters().Length == 0
-            );
+            UploadCompat.EnsureResolved();
+            var get = UploadCompat.HookMethod;
 
             if (!ArmatureCompat.ArmatureLinkAvailable || get == null) {
                 throw new InvalidOperationException("target signature mismatch");

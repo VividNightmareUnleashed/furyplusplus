@@ -61,6 +61,10 @@ namespace FuryPlusPlus {
         // VRC built-in globals that may legitimately exceed 1 as ints (mirror of stock guard)
         internal static ISet<string> VrchatGlobalParams;
 
+        /** VRCFury's always-true bool parameter naming convention (VF_<n>_True). */
+        internal static readonly System.Text.RegularExpressions.Regex AlwaysTrueParamName =
+            new System.Text.RegularExpressions.Regex(@"^VF_\d+_True$");
+
         internal static void EnsureResolved() {
             if (resolved) return;
             resolved = true;

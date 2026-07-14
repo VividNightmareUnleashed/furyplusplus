@@ -21,11 +21,11 @@ namespace FuryPlusPlus {
         }
 
         internal static string ModuleKey(Module module) {
-            return KeyPrefix + "module." + module.Id;
+            return module.PrefKey;
         }
 
         internal static string OptionKey(Module module, ModuleOption option) {
-            return ModuleKey(module) + "." + option.Suffix;
+            return option.KeyFor(module);
         }
 
         internal static bool IsModuleEnabled(Module module) {
@@ -61,6 +61,14 @@ namespace FuryPlusPlus {
             EditorPrefs.SetBool(OptionKey(module, option), value);
         }
 
+        internal static string GetListOption(Module module, ModuleListOption option) {
+            return EditorPrefs.GetString(option.KeyFor(module), "");
+        }
+
+        internal static void SetListOption(Module module, ModuleListOption option, string value) {
+            EditorPrefs.SetString(option.KeyFor(module), value ?? "");
+        }
+
         internal static bool DetailedProfiling {
             get { return EditorPrefs.GetBool(DetailedProfilingKey, false); }
             set { EditorPrefs.SetBool(DetailedProfilingKey, value); }
@@ -73,6 +81,9 @@ namespace FuryPlusPlus {
                 EditorPrefs.DeleteKey(ModuleKey(module));
                 foreach (var option in module.Options) {
                     EditorPrefs.DeleteKey(OptionKey(module, option));
+                }
+                foreach (var option in module.ListOptions) {
+                    EditorPrefs.DeleteKey(option.KeyFor(module));
                 }
             }
             EditorPrefs.DeleteKey(DetailedProfilingKey);

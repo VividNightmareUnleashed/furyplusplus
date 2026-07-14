@@ -12,16 +12,12 @@ namespace FuryPlusPlus {
      * A cheap raw-array scan can prove the others empty without constructing
      * VRCFury's recursive immutable VFBehaviourContainer graph.
      */
-    internal sealed class BehaviourContainerFilterModule : Module {
-        internal static BehaviourContainerFilterModule Instance { get; private set; }
-
-        internal BehaviourContainerFilterModule() {
-            Instance = this;
-        }
+    internal sealed class BehaviourContainerFilterModule : Module<BehaviourContainerFilterModule> {
 
         internal override string Id => "behaviourContainerFilter";
         internal override string DisplayName => "Behaviour container filter";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Controllers & animation";
         internal override string Description =>
             "Skips behaviour-container graph builds for layers a raw array scan proves irrelevant.";
 
@@ -33,6 +29,13 @@ namespace FuryPlusPlus {
         internal override string ReportStats() {
             var stats = BehaviourContainerFilterPatch.LastStats;
             return stats == "none" ? null : stats;
+        }
+
+        internal override (string Text, string Tooltip)? ReportGain(Estimators.Result? analysis) {
+            return BehaviourContainerFilterPatch.LastSkipped > 0
+                ? ($"{BehaviourContainerFilterPatch.LastSkipped}/{BehaviourContainerFilterPatch.LastChecked} " +
+                   "layer scans skipped last bake", BehaviourContainerFilterPatch.LastStats)
+                : ((string, string)?)null;
         }
     }
 
@@ -54,6 +57,8 @@ namespace FuryPlusPlus {
         private static Type animatorLayerControlType;
 
         internal static string LastStats { get; private set; } = "none";
+        internal static int LastSkipped { get; private set; }
+        internal static int LastChecked { get; private set; }
 
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
             var containerGetter = VfLayerCompat.BehaviourContainersGetter;
@@ -157,6 +162,8 @@ namespace FuryPlusPlus {
             var context = active;
             if (context != null) {
                 LastStats = context.Name + "=" + context.LayersSkipped + "/" + context.LayersChecked;
+                LastSkipped = context.LayersSkipped;
+                LastChecked = context.LayersChecked;
             }
             active = null;
             return __exception;

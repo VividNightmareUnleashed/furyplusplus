@@ -12,16 +12,12 @@ namespace FuryPlusPlus {
      * mutated during this action, so cache the exact GetBindings result for each
      * (owner, controller) pair for the duration of Apply.
      */
-    internal sealed class BlendshapeBindingCacheModule : Module {
-        internal static BlendshapeBindingCacheModule Instance { get; private set; }
-
-        internal BlendshapeBindingCacheModule() {
-            Instance = this;
-        }
+    internal sealed class BlendshapeBindingCacheModule : Module<BlendshapeBindingCacheModule> {
 
         internal override string Id => "blendshapeBindingCache";
         internal override string DisplayName => "Blendshape binding cache";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Controllers & animation";
         internal override string Description =>
             "Caches BlendshapeOptimizer's per-(mesh, controller) binding scans for the duration of its Apply pass.";
 

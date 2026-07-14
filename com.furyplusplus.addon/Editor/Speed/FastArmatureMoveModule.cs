@@ -13,16 +13,12 @@ namespace FuryPlusPlus {
      * avatar, so build that invariant set once and preserve the original reparent,
      * safe-name, path-recording and PhysBone-exclusion behavior directly.
      */
-    internal sealed class FastArmatureMoveModule : Module {
-        internal static FastArmatureMoveModule Instance { get; private set; }
-
-        internal FastArmatureMoveModule() {
-            Instance = this;
-        }
+    internal sealed class FastArmatureMoveModule : Module<FastArmatureMoveModule> {
 
         internal override string Id => "fastArmatureMove";
         internal override string DisplayName => "Fast Armature Link moves";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Armature & links";
         internal override string Description =>
             "Builds the immovable-bone set once per Armature Link instead of once per deferred move.";
 

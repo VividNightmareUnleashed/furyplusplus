@@ -13,16 +13,12 @@ namespace FuryPlusPlus {
      * Keep that graph for the duration of Apply and skip the second traversal when
      * the discovery pass found no tracking controls on a layer.
      */
-    internal sealed class TrackingBehaviourIndexModule : Module {
-        internal static TrackingBehaviourIndexModule Instance { get; private set; }
-
-        internal TrackingBehaviourIndexModule() {
-            Instance = this;
-        }
+    internal sealed class TrackingBehaviourIndexModule : Module<TrackingBehaviourIndexModule> {
 
         internal override string Id => "trackingBehaviourIndex";
         internal override string DisplayName => "Tracking behaviour index";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Controllers & animation";
         internal override string Description =>
             "Reuses each layer's behaviour-container graph during tracking conflict resolution.";
 

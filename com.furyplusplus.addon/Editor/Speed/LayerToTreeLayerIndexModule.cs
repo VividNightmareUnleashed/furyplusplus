@@ -12,16 +12,12 @@ namespace FuryPlusPlus {
      * cheap conflict check into thousands of repeated controller-layer scans. Keep a
      * short-lived state-machine-to-index table while LayerToTreeService.Apply runs.
      */
-    internal sealed class LayerToTreeLayerIndexModule : Module {
-        internal static LayerToTreeLayerIndexModule Instance { get; private set; }
-
-        internal LayerToTreeLayerIndexModule() {
-            Instance = this;
-        }
+    internal sealed class LayerToTreeLayerIndexModule : Module<LayerToTreeLayerIndexModule> {
 
         internal override string Id => "layerToTreeLayerIndex";
         internal override string DisplayName => "Layer-to-tree layer index";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Controllers & animation";
         internal override string Description =>
             "O(1) layer lookups during VRCFury's layer-to-blendtree conversion pass.";
 
@@ -60,9 +56,9 @@ namespace FuryPlusPlus {
             var remove = ReflectionUtils.FindNoArgVoid(layerType, "Remove");
             var move = ReflectionUtils.FindMethodWithSignature(layerType, "Move", typeof(void), typeof(int));
 
-            controllerField = layerType?.GetField("ctrl", BindingFlags.Instance | BindingFlags.NonPublic);
-            stateMachineField = layerType?
-                .GetField("rootStateMachine", BindingFlags.Instance | BindingFlags.NonPublic);
+            VfLayerCompat.EnsureResolved();
+            controllerField = VfLayerCompat.CtrlField;
+            stateMachineField = VfLayerCompat.RootStateMachineField;
 
             if (apply == null || getLayerId == null || exists == null || remove == null || move == null
                               || controllerField == null || stateMachineField == null) {

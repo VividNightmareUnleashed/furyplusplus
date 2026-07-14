@@ -1,5 +1,5 @@
 using System;
-using System.Reflection;
+using System.Collections.Generic;
 using HarmonyLib;
 using UnityEngine;
 
@@ -15,32 +15,35 @@ namespace FuryPlusPlus {
      * Services whose behavior users legitimately test in play mode (bounding-box fix,
      * Quest material stripping, audio/contact fixes) are deliberately NOT skipped.
      */
-    internal sealed class PlayModeSkipsModule : Module {
-        internal static PlayModeSkipsModule Instance { get; private set; }
-
+    internal sealed class PlayModeSkipsModule : Module<PlayModeSkipsModule> {
+        // The skips change the play-mode processed avatar, so they are bake-output
+        // affecting for the bake-cache config key even though uploads are untouched.
         internal static readonly ModuleOption SkipMipmapStreaming = new ModuleOption(
             "skipMipmapStreaming", "Skip mipmap-streaming fix (upload-only SDK rule)", true,
-            "Skips the texture/material cloning pass that only exists to satisfy upload validation.");
+            "Skips the texture/material cloning pass that only exists to satisfy upload validation.",
+            affectsBakeOutput: true);
         internal static readonly ModuleOption SkipMenuIconFixes = new ModuleOption(
             "skipMenuIconFixes", "Skip menu icon resize/compress", true,
-            "Menu icons render fine untouched in play mode.");
+            "Menu icons render fine untouched in play mode.",
+            affectsBakeOutput: true);
         internal static readonly ModuleOption SkipFinalValidation = new ModuleOption(
             "skipFinalValidation", "Skip final validation warnings", true,
-            "Param/contact-count warnings still fire on real uploads.");
+            "Param/contact-count warnings still fire on real uploads.",
+            affectsBakeOutput: true);
 
-        internal PlayModeSkipsModule() {
-            Instance = this;
-        }
+        private static readonly ModuleOption[] AllOptions = {
+            SkipMipmapStreaming, SkipMenuIconFixes, SkipFinalValidation
+        };
 
         internal override string Id => "playModeSkips";
         internal override string DisplayName => "Play-mode upload-only pass skipping";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Play-mode iteration";
         internal override string Description =>
             "Skips VRCFury passes that only matter for real uploads when building for play mode. " +
             "Uploads are never affected.";
 
-        internal override System.Collections.Generic.IReadOnlyList<ModuleOption> Options =>
-            new[] { SkipMipmapStreaming, SkipMenuIconFixes, SkipFinalValidation };
+        internal override IReadOnlyList<ModuleOption> Options => AllOptions;
 
         internal override void Install(Harmony harmony, VrcfuryCompat compat) {
             PlayModeSkipsPatch.Install(harmony, compat);
@@ -48,14 +51,8 @@ namespace FuryPlusPlus {
     }
 
     internal static class PlayModeSkipsPatch {
-        private static MethodInfo isActuallyUploading;
-
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
-            isActuallyUploading = ReflectionUtils.FindMethodWithSignature(
-                ReflectionUtils.FindType("VF.Hooks.IsActuallyUploadingHook"),
-                "Get",
-                typeof(bool)
-            );
+            UploadCompat.DemandCore();
             var mipmapApply = ReflectionUtils.FindNoArgVoid(
                 ReflectionUtils.FindType("VF.Service.FixMipmapStreamingService"), "Apply");
             var menuIconApply = ReflectionUtils.FindNoArgVoid(
@@ -63,8 +60,7 @@ namespace FuryPlusPlus {
             var validationApply = ReflectionUtils.FindNoArgVoid(
                 ReflectionUtils.FindType("VF.Service.FinalValidationService"), "Apply");
 
-            if (isActuallyUploading == null || mipmapApply == null
-                                            || menuIconApply == null || validationApply == null) {
+            if (mipmapApply == null || menuIconApply == null || validationApply == null) {
                 throw new InvalidOperationException("target signature mismatch");
             }
 
@@ -101,8 +97,9 @@ namespace FuryPlusPlus {
                 if (module == null || !module.Enabled) return false;
                 if (!Settings.IsOptionEnabled(module, option)) return false;
                 if (!Application.isPlaying) return false;
-                // Belt-and-braces against future SDK play-upload hybrids.
-                return !(bool)isActuallyUploading.Invoke(null, null);
+                // Belt-and-braces against future SDK play-upload hybrids: never skip a
+                // maybe-upload, so a resolution failure assumes uploading.
+                return !UploadCompat.IsActuallyUploading(assumeOnFailure: true);
             } catch (Exception e) {
                 Log.Warn("Play-mode skip fell back to VRCFury: " + e.Message);
                 return false;

@@ -45,22 +45,12 @@ namespace FuryPlusPlus {
          * geometry transforms depend on.
          */
         internal static (bool LanePacking, string Sub8List) CurrentCompressorInputs() {
-            var lanePacking = CompressorLanePackingModule.Instance != null
-                              && ModuleRegistry.IsActive(CompressorLanePackingModule.Instance)
-                              && CompressorLanePackingModule.Instance.Enabled;
-            var sub8On = CompressorSub8Module.Instance != null
-                         && ModuleRegistry.IsActive(CompressorSub8Module.Instance)
-                         && CompressorSub8Module.Instance.Enabled;
-            var sub8List = sub8On
-                ? NormalizeList(UnityEditor.EditorPrefs.GetString(CompressorScope.Sub8ListKey, ""))
+            var lanePacking = ModuleRegistry.IsOn(CompressorLanePackingModule.Instance);
+            var sub8List = ModuleRegistry.IsOn(CompressorSub8Module.Instance)
+                ? Globs.Normalize(Settings.GetListOption(
+                    CompressorSub8Module.Instance, CompressorSub8Module.PrecisionList))
                 : "";
             return (lanePacking, sub8List);
-        }
-
-        private static string NormalizeList(string raw) {
-            return string.Join(";", raw.Split(';')
-                .Select(entry => entry.Trim())
-                .Where(entry => entry.Length > 0));
         }
 
         internal static void SaveDesktopDecision(

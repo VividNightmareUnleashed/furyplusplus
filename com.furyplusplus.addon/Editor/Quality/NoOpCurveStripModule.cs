@@ -21,17 +21,12 @@ namespace FuryPlusPlus {
      * purpose: float curves only; a curve counts as constant only when every key has the
      * same value and zero tangents; unknown rest values block stripping.
      */
-    internal sealed class NoOpCurveStripModule : Module {
-        internal static NoOpCurveStripModule Instance { get; private set; }
-
-        internal NoOpCurveStripModule() {
-            Instance = this;
-        }
-
+    internal sealed class NoOpCurveStripModule : Module<NoOpCurveStripModule> {
         internal override string Id => "noOpCurveStrip";
         internal override string DisplayName => "Strip no-op animation curves";
         internal override ModuleKind Kind => ModuleKind.Quality;
         internal override CompatTier RequiredTier => CompatTier.ExactVersion;
+        internal override string SettingsGroup => "Animation clips";
         internal override string Description =>
             "Removes curves that only ever write a property's resting value — fewer " +
             "always-evaluated writes after blendtree conversion, smaller clips.";
@@ -44,55 +39,25 @@ namespace FuryPlusPlus {
         internal override string ReportStats() {
             return NoOpCurveStripPass.LastStats;
         }
+
+        internal override (string Text, string Tooltip)? ReportGain(Estimators.Result? analysis) {
+            return NoOpCurveStripPass.LastStrippedCurves > 0
+                ? ($"{N(NoOpCurveStripPass.LastStrippedCurves)} curves stripped last bake",
+                    NoOpCurveStripPass.LastStats)
+                : ((string, string)?)null;
+        }
     }
 
     internal static class NoOpCurveStripPass {
         internal static string LastStats;
+        internal static int LastStrippedCurves;
 
-        private static MethodInfo getAllUsedControllers;
-        private static Type clipsIteratorType;
-        private static MethodInfo clipsFrom;
-        private static MethodInfo getAllCurves;
-        private static MethodInfo setCurves;
-        private static MethodInfo isProxyClip;
         private static MethodInfo getDefaultClip;
-        private static PropertyInfo curveIsFloat;
-        private static PropertyInfo curveFloatCurve;
-        private static Type curveTupleType;
 
         internal static void Resolve() {
-            var controllersServiceType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Service.ControllersService"), "VF.Service.ControllersService");
-            getAllUsedControllers = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(controllersServiceType, "GetAllUsedControllers",
-                    method => method.GetParameters().Length == 0),
-                "ControllersService.GetAllUsedControllers()");
-
-            clipsIteratorType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Utils.AnimatorIterator+Clips"), "VF.Utils.AnimatorIterator+Clips");
-            var vfControllerType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Utils.Controller.VFController"), "VF.Utils.Controller.VFController");
-            clipsFrom = ReflectionUtils.Demand(
-                clipsIteratorType.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                    .SingleOrDefault(method => method.Name == "From"
-                                               && method.GetParameters().Length == 1
-                                               && method.GetParameters()[0].ParameterType == vfControllerType),
-                "AnimatorIterator.Clips.From(VFController)");
-
-            var clipExtType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Utils.AnimationClipExtensions"), "VF.Utils.AnimationClipExtensions");
-            getAllCurves = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(clipExtType, "GetAllCurves",
-                    method => method.GetParameters().Length == 1),
-                "AnimationClipExtensions.GetAllCurves(clip)");
-            setCurves = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(clipExtType, "SetCurves",
-                    method => method.GetParameters().Length == 2),
-                "AnimationClipExtensions.SetCurves(clip, curves)");
-            isProxyClip = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(clipExtType, "IsProxyClip",
-                    method => method.GetParameters().Length == 1),
-                "AnimationClipExtensions.IsProxyClip(clip)");
+            ClipCurveCompat.DemandCore();
+            ReflectionUtils.Demand(ClipCurveCompat.ClipsFromController, "AnimatorIterator.Clips.From(VFController)");
+            ReflectionUtils.Demand(ClipCurveCompat.SetCurves, "AnimationClipExtensions.SetCurves(clip, curves)");
 
             var fixWdType = ReflectionUtils.Demand(
                 ReflectionUtils.FindType("VF.Service.FixWriteDefaultsService"), "VF.Service.FixWriteDefaultsService");
@@ -100,14 +65,6 @@ namespace FuryPlusPlus {
                 ReflectionUtils.FindUniqueMethod(fixWdType, "GetDefaultClip",
                     method => method.GetParameters().Length == 0),
                 "FixWriteDefaultsService.GetDefaultClip()");
-
-            var curveType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Utils.FloatOrObjectCurve"), "VF.Utils.FloatOrObjectCurve");
-            curveIsFloat = ReflectionUtils.Demand(curveType.GetProperty("IsFloat"), "FloatOrObjectCurve.IsFloat");
-            curveFloatCurve = ReflectionUtils.Demand(curveType.GetProperty("FloatCurve"), "FloatOrObjectCurve.FloatCurve");
-
-            curveTupleType = ReflectionUtils.Demand(
-                getAllCurves.ReturnType.GetElementType(), "(EditorCurveBinding, FloatOrObjectCurve)");
         }
 
         internal static void Run() {
@@ -121,10 +78,9 @@ namespace FuryPlusPlus {
 
             // Collect every clip of every used controller once.
             var clips = new HashSet<AnimationClip>();
-            var managers = (IEnumerable)getAllUsedControllers.Invoke(controllersService, null);
-            var iterator = Activator.CreateInstance(clipsIteratorType);
+            var managers = (IEnumerable)ClipCurveCompat.GetAllUsedControllers.Invoke(controllersService, null);
             foreach (var manager in managers) {
-                foreach (var clip in (IEnumerable)clipsFrom.Invoke(iterator, new[] { manager })) {
+                foreach (var clip in ClipCurveCompat.ClipsFrom(manager)) {
                     if (clip is AnimationClip animationClip) clips.Add(animationClip);
                 }
             }
@@ -144,21 +100,21 @@ namespace FuryPlusPlus {
             }
 
             foreach (var clip in clips) {
-                var curves = (Array)getAllCurves.Invoke(null, new object[] { clip });
+                var curves = ClipCurveCompat.AllCurvesOf(clip);
                 foreach (var entry in curves) {
-                    var binding = (EditorCurveBinding)curveTupleType.GetField("Item1").GetValue(entry);
-                    var curve = curveTupleType.GetField("Item2").GetValue(entry);
+                    var binding = ClipCurveCompat.TupleBinding(entry);
+                    var curve = ClipCurveCompat.TupleCurve(entry);
 
                     // AAPs are parameters, not properties — never touch.
                     if (binding.type == typeof(Animator) && string.IsNullOrEmpty(binding.path)) {
                         blockedBindings.Add(binding);
                         continue;
                     }
-                    if (curve == null || !(bool)curveIsFloat.GetValue(curve)) {
+                    if (curve == null || !ClipCurveCompat.IsFloat(curve)) {
                         blockedBindings.Add(binding);
                         continue;
                     }
-                    var floatCurve = curveFloatCurve.GetValue(curve) as AnimationCurve;
+                    var floatCurve = ClipCurveCompat.FloatCurveOf(curve);
                     if (floatCurve == null || !IsConstant(floatCurve, out var value)) {
                         blockedBindings.Add(binding);
                         continue;
@@ -185,18 +141,18 @@ namespace FuryPlusPlus {
             var examples = new List<string>();
             foreach (var group in byClip) {
                 var clip = group.Key;
-                if ((bool)isProxyClip.Invoke(null, new object[] { clip })) continue;
+                if (ClipCurveCompat.IsProxyClip(clip)) continue;
                 var removals = group.ToList();
                 if (removals.Count == 0) continue;
 
-                var tuples = Array.CreateInstance(curveTupleType, removals.Count);
+                var tuples = Array.CreateInstance(ClipCurveCompat.CurveTupleType, removals.Count);
                 for (var i = 0; i < removals.Count; i++) {
-                    tuples.SetValue(Activator.CreateInstance(curveTupleType, removals[i].Binding, null), i);
+                    tuples.SetValue(ClipCurveCompat.CreateTuple(removals[i].Binding, null), i);
                     if (examples.Count < 8) {
                         examples.Add($"{removals[i].Binding.path}/{removals[i].Binding.propertyName}={removals[i].Value}");
                     }
                 }
-                setCurves.Invoke(null, new object[] { clip, tuples });
+                ClipCurveCompat.SetCurves.Invoke(null, new object[] { clip, tuples });
                 strippedCurves += removals.Count;
                 touchedClips++;
             }
@@ -205,10 +161,16 @@ namespace FuryPlusPlus {
                 Log.Info($"Stripped {strippedCurves} no-op curve(s) from {touchedClips} clip(s) " +
                          $"(all writers were resting-value constants). e.g. {string.Join("; ", examples)}");
             }
+            LastStrippedCurves = strippedCurves;
             LastStats = strippedCurves == 0 ? null : $"curves={strippedCurves} clips={touchedClips}";
         }
 
-        private static bool IsConstant(AnimationCurve curve, out float value) {
+        /**
+         * The shared "no-op write at rest" doctrine — OffSideEliminationPatch applies the
+         * same rules to a candidate off clip; both modules' safety arguments depend on this
+         * single definition.
+         */
+        internal static bool IsConstant(AnimationCurve curve, out float value) {
             value = 0;
             var keys = curve.keys;
             if (keys.Length == 0) return false;
@@ -225,7 +187,7 @@ namespace FuryPlusPlus {
             return true;
         }
 
-        private static bool ValuesMatch(EditorCurveBinding binding, float curveValue, float restValue) {
+        internal static bool ValuesMatch(EditorCurveBinding binding, float curveValue, float restValue) {
             if (curveValue.Equals(restValue)) return true;
             // Blendshape weights round-trip through floats; VRCFury itself compares them
             // approximately (BlendshapeOptimizerBuilder does the same).

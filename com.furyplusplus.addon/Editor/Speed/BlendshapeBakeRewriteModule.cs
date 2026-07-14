@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using HarmonyLib;
 using UnityEditor;
 using UnityEngine;
@@ -25,29 +26,28 @@ namespace FuryPlusPlus {
      * against the frame COUNT) is FIXED by default per project policy, with a sub-toggle
      * to restore stock-identical behavior; log strings match stock byte-for-byte.
      */
-    internal sealed class BlendshapeBakeRewriteModule : Module {
-        internal static BlendshapeBakeRewriteModule Instance { get; private set; }
-
+    internal sealed class BlendshapeBakeRewriteModule : Module<BlendshapeBakeRewriteModule> {
         internal static readonly ModuleOption FixMultiFrameInterpolation = new ModuleOption(
             "fixMultiFrameInterpolation", "Fix multi-frame blendshape interpolation", true,
             "VRCFury selects the interpolation frame by comparing the weight against the frame " +
             "COUNT (and errors when the weight exceeds it). This selects by frame weight as " +
-            "intended. Disable for stock-identical (buggy) behavior.");
+            "intended. Disable for stock-identical (buggy) behavior.",
+            affectsBakeOutput: true);
 
-        internal BlendshapeBakeRewriteModule() {
-            Instance = this;
-        }
+        private static readonly ModuleOption[] AllOptions = {
+            FixMultiFrameInterpolation
+        };
 
         internal override string Id => "blendshapeBakeRewrite";
         internal override string DisplayName => "Fast blendshape optimizer bake";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Controllers & animation";
         internal override string Description =>
             "Rewrites VRCFury's Blendshape Optimizer bake to avoid gigabytes of array " +
             "churn on dense meshes. Output is bit-identical except the (default-on) " +
             "multi-frame interpolation fix below.";
 
-        internal override System.Collections.Generic.IReadOnlyList<ModuleOption> Options =>
-            new[] { FixMultiFrameInterpolation };
+        internal override System.Collections.Generic.IReadOnlyList<ModuleOption> Options => AllOptions;
 
         internal override void Install(Harmony harmony, VrcfuryCompat compat) {
             BlendshapeBakeRewritePatch.Install(harmony, compat);
@@ -72,7 +72,13 @@ namespace FuryPlusPlus {
         private static MethodInfo ownerGetPath;
         private static MethodInfo isMaybeMmdBlendshape;
         private static MethodInfo meshDirty;
-        private static FieldInfo vfGameObjectField;
+        // Tuple element fields of GetBindings/GetSubControllers entries, cached from the
+        // first entry seen (the runtime types are stable per domain load) so per-entry
+        // loops never touch the member tables.
+        private static FieldInfo bindingsItem1;
+        private static FieldInfo bindingsItem2;
+        private static FieldInfo pairItem1;
+        private static FieldInfo pairItem2;
 
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
             const BindingFlags any = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
@@ -120,8 +126,7 @@ namespace FuryPlusPlus {
                                                && method.GetParameters().Length == 0),
                 "VFGameObject.GetComponentsInSelfAndChildren<T>()")
                 .MakeGenericMethod(typeof(SkinnedMeshRenderer));
-            vfGameObjectField = ReflectionUtils.Demand(
-                vfGameObjectType.GetField("_gameObject", any), "VFGameObject._gameObject");
+            VfGameObjectCompat.DemandCore();
 
             // Extension methods used by the stock body.
             skinGetMesh = ReflectionUtils.Demand(
@@ -181,8 +186,13 @@ namespace FuryPlusPlus {
                 .Any(feature => mmdCompatibilityType.IsInstanceOfType(feature));
             var avatarObject = avatarObjectField.GetValue(builder);
             var avatar = (VRCAvatarDescriptor)avatarField.GetValue(builder);
-            var avatarRoot = vfGameObjectField.GetValue(avatarObject) as GameObject;
+            var avatarRoot = VfGameObjectCompat.Unwrap(avatarObject);
             if (avatarRoot == null) throw new Exception("no avatar root");
+
+            // Phase-boundary pref read, hoisted out of the per-shape bake loop.
+            var fixInterpolation = Settings.IsOptionEnabled(
+                BlendshapeBakeRewriteModule.Instance,
+                BlendshapeBakeRewriteModule.FixMultiFrameInterpolation);
 
             // (a) HOISTED: skin-invariant animated-binding collection, one pass.
             var controllersService = controllersField.GetValue(builder);
@@ -192,9 +202,13 @@ namespace FuryPlusPlus {
                 var bindings = (IEnumerable)ReflectionUtils.InvokeUnwrapped(
                     getBindings, builder, new[] { owner, controller });
                 foreach (var entry in bindings) {
-                    var entryType = entry.GetType();
-                    var binding = (EditorCurveBinding)entryType.GetField("Item1").GetValue(entry);
-                    var curve = (AnimationCurve)entryType.GetField("Item2").GetValue(entry);
+                    if (bindingsItem1 == null) {
+                        var entryType = entry.GetType();
+                        bindingsItem1 = entryType.GetField("Item1");
+                        bindingsItem2 = entryType.GetField("Item2");
+                    }
+                    var binding = (EditorCurveBinding)bindingsItem1.GetValue(entry);
+                    var curve = (AnimationCurve)bindingsItem2.GetValue(entry);
                     animatedBindings.Add((binding, curve));
                 }
             }
@@ -202,11 +216,25 @@ namespace FuryPlusPlus {
                 AddBindings(avatarObject, manager);
             }
             foreach (var pair in (IEnumerable)getSubControllers.Invoke(animatorsService, null)) {
-                var pairType = pair.GetType();
-                AddBindings(pairType.GetField("Item1").GetValue(pair), pairType.GetField("Item2").GetValue(pair));
+                if (pairItem1 == null) {
+                    var pairType = pair.GetType();
+                    pairItem1 = pairType.GetField("Item1");
+                    pairItem2 = pairType.GetField("Item2");
+                }
+                AddBindings(pairItem1.GetValue(pair), pairItem2.GetValue(pair));
             }
 
-            var logOutput = "";
+            // Bucket the skin-invariant blendshape bindings by path once, instead of
+            // rescanning the full binding list for every skinned mesh below.
+            var blendshapeBindingsByPath = new Dictionary<string, List<(string Blendshape, AnimationCurve Curve)>>();
+            foreach (var (binding, curve) in animatedBindings) {
+                if (binding.type != typeof(SkinnedMeshRenderer)) continue;
+                if (!binding.propertyName.StartsWith("blendShape.")) continue;
+                blendshapeBindingsByPath.GetOrAddList(binding.path)
+                    .Add((binding.propertyName.Substring(11), curve));
+            }
+
+            var logOutput = new StringBuilder();
             var skins = (IEnumerable)vfGetComponentsInSelfAndChildren.Invoke(avatarObject, null);
             foreach (SkinnedMeshRenderer skin in skins) {
                 var mesh = skinGetMesh.Invoke(null, new object[] { skin }) as Mesh;
@@ -217,10 +245,10 @@ namespace FuryPlusPlus {
                 var path = (string)ReflectionUtils.InvokeUnwrapped(
                     ownerGetPath, skinOwnerObj, new[] { avatarObjectField.GetValue(builder), (object)false });
 
-                logOutput += $"\n┬─ Optimizing {path}\n";
+                logOutput.Append($"\n┬─ Optimizing {path}\n");
 
                 var animatedBlendshapes = CollectAnimatedBlendshapesForMesh(
-                    skin, path, animatedBindings, avatar);
+                    skin, path, blendshapeBindingsByPath, avatar);
 
                 bool ShouldKeepName(string name) {
                     if (animatedBlendshapes.Contains(name)) return true;
@@ -275,7 +303,7 @@ namespace FuryPlusPlus {
                     frameCounts[id] = originalMesh.GetBlendShapeFrameCount(id);
                     var keep = blendshapeIdsToKeep.Contains(id);
                     if (!keep) {
-                        BakeShape(originalMesh, id, frameCounts[id], savedWeights[id],
+                        BakeShape(originalMesh, id, frameCounts[id], savedWeights[id], fixInterpolation,
                             verts, normals, tangents, bufferV, bufferN, bufferT, ref bakedAny);
                     } else if (sameObject) {
                         var frames = new List<(float, Vector3[], Vector3[], Vector3[])>();
@@ -313,7 +341,7 @@ namespace FuryPlusPlus {
                         logOutputDetail =
                             $"Baking BlendShape \"{names[id]}\" into mesh at weight {savedWeights[id]}, as weight is not animated\n";
                     }
-                    logOutput += (id != blendshapeCount - 1 ? "├" : "└") + logOutputDetail;
+                    logOutput.Append(id != blendshapeCount - 1 ? "├" : "└").Append(logOutputDetail);
                 }
 
                 if (bakedAny) {
@@ -350,7 +378,7 @@ namespace FuryPlusPlus {
          * arrays instead of round-tripping the mesh per shape.
          */
         private static void BakeShape(
-            Mesh originalMesh, int id, int frameCount, float weight100,
+            Mesh originalMesh, int id, int frameCount, float weight100, bool fix,
             Vector3[] verts, Vector3[] normals, Vector4[] tangents,
             Vector3[] bufferV, Vector3[] bufferN, Vector3[] bufferT,
             ref bool bakedAny
@@ -365,9 +393,6 @@ namespace FuryPlusPlus {
                 bakedAny = true;
             } else {
                 int beforeFrame;
-                var fix = Settings.IsOptionEnabled(
-                    BlendshapeBakeRewriteModule.Instance,
-                    BlendshapeBakeRewriteModule.FixMultiFrameInterpolation);
                 if (fix) {
                     // Intended semantics: first frame whose weight reaches the target.
                     // Guaranteed to exist here (weight100 < lastFrameWeight).
@@ -433,28 +458,22 @@ namespace FuryPlusPlus {
         private static HashSet<string> CollectAnimatedBlendshapesForMesh(
             SkinnedMeshRenderer skin,
             string skinPath,
-            List<(EditorCurveBinding Binding, AnimationCurve Curve)> animatedBindings,
+            Dictionary<string, List<(string Blendshape, AnimationCurve Curve)>> blendshapeBindingsByPath,
             VRCAvatarDescriptor avatar
         ) {
             var animatedBlendshapes = new HashSet<string>();
             var mesh = skin.sharedMesh;
-            foreach (var (binding, curve) in animatedBindings) {
-                if (binding.type != typeof(SkinnedMeshRenderer)) continue;
-                if (!binding.propertyName.StartsWith("blendShape.")) continue;
-                if (binding.path != skinPath) continue;
-                var blendshape = binding.propertyName.Substring(11);
-                var animatesToNondefaultValue = false;
-                var index = mesh != null ? mesh.GetBlendShapeIndex(blendshape) : -1;
-                if (index >= 0) {
+            if (blendshapeBindingsByPath.TryGetValue(skinPath, out var bindings)) {
+                foreach (var (blendshape, curve) in bindings) {
+                    var index = mesh != null ? mesh.GetBlendShapeIndex(blendshape) : -1;
+                    if (index < 0) continue;
                     var skinDefaultValue = skin.GetBlendShapeWeight(index);
-                    foreach (var frameValue in curve.keys.Select(key => key.value)) {
-                        if (!Mathf.Approximately(frameValue, skinDefaultValue)) {
-                            animatesToNondefaultValue = true;
+                    foreach (var key in curve.keys) {
+                        if (!Mathf.Approximately(key.value, skinDefaultValue)) {
+                            animatedBlendshapes.Add(blendshape);
+                            break;
                         }
                     }
-                }
-                if (animatesToNondefaultValue) {
-                    animatedBlendshapes.Add(blendshape);
                 }
             }
 

@@ -1,5 +1,4 @@
 using System;
-using System.Reflection;
 using HarmonyLib;
 using UnityEditor;
 
@@ -20,16 +19,12 @@ namespace FuryPlusPlus {
      * recompile) loses the in-memory bake, where stock would have survived via disk.
      * Never active for uploads (IsActuallyUploadingHook gate).
      */
-    internal sealed class PlayModeNoDiskSaveModule : Module {
-        internal static PlayModeNoDiskSaveModule Instance { get; private set; }
-
-        internal PlayModeNoDiskSaveModule() {
-            Instance = this;
-        }
+    internal sealed class PlayModeNoDiskSaveModule : Module<PlayModeNoDiskSaveModule> {
 
         internal override string Id => "playModeNoDiskSave";
         internal override string DisplayName => "Play mode: skip disk serialization (⚗️EXPERIMENTAL)";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Play-mode iteration";
         internal override CompatTier RequiredTier => CompatTier.ExactVersion;
         internal override bool DefaultEnabled => false;
         internal override string Description =>
@@ -44,16 +39,23 @@ namespace FuryPlusPlus {
         internal override string ReportStats() {
             return PlayModeNoDiskSavePatch.LastStats;
         }
+
+        internal override (string Text, string Tooltip)? ReportGain(Estimators.Result? analysis) {
+            return PlayModeNoDiskSavePatch.LastSkippedWrites > 0
+                ? ($"{N(PlayModeNoDiskSavePatch.LastSkippedWrites)} disk writes skipped last bake",
+                    PlayModeNoDiskSavePatch.LastStats)
+                : ((string, string)?)null;
+        }
     }
 
     internal static class PlayModeNoDiskSavePatch {
         internal static string LastStats;
+        internal static int LastSkippedWrites;
 
         private static bool scopeActive;
         private static bool suppressPruneThisPlay;
         private static int skippedWrites;
         private static bool subscribed;
-        private static MethodInfo isActuallyUploading;
 
         internal static void Install(Harmony harmony) {
             var assetDbType = ReflectionUtils.Demand(
@@ -88,10 +90,7 @@ namespace FuryPlusPlus {
                 ReflectionUtils.FindUniqueMethod(factoryType, "Prune",
                     method => method.GetParameters().Length == 0),
                 "VrcfObjectFactory.Prune()");
-            isActuallyUploading = ReflectionUtils.Demand(
-                ReflectionUtils.FindMethodWithSignature(
-                    ReflectionUtils.FindType("VF.Hooks.IsActuallyUploadingHook"), "Get", typeof(bool)),
-                "IsActuallyUploadingHook.Get()");
+            UploadCompat.DemandCore();
 
             harmony.Patch(saveRun,
                 prefix: new HarmonyMethod(typeof(PlayModeNoDiskSavePatch), nameof(RunPrefix)),
@@ -117,13 +116,9 @@ namespace FuryPlusPlus {
 
         private static void RunPrefix() {
             var enabled = PlayModeNoDiskSaveModule.Instance?.Enabled == true;
-            bool uploading;
-            try {
-                uploading = (bool)isActuallyUploading.Invoke(null, null);
-            } catch {
-                uploading = true; // unknown → assume upload → never skip
-            }
-            scopeActive = enabled && UnityEngine.Application.isPlaying && !uploading;
+            // Failure default: unknown → assume upload → never skip.
+            scopeActive = enabled && UnityEngine.Application.isPlaying
+                          && !UploadCompat.IsActuallyUploading(assumeOnFailure: true);
             if (scopeActive) {
                 suppressPruneThisPlay = true;
                 skippedWrites = 0;
@@ -137,6 +132,7 @@ namespace FuryPlusPlus {
                     Log.Info($"Play-mode bake kept in memory: skipped {skippedWrites} disk write(s) " +
                              "(assets are not persisted; exit/re-enter play after script changes).");
                     LastStats = $"skippedWrites={skippedWrites}";
+                    LastSkippedWrites = skippedWrites;
                 }
             }
             return __exception;

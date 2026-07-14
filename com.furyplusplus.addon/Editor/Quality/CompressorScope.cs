@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using HarmonyLib;
-using UnityEditor;
 using VRC.SDK3.Avatars.ScriptableObjects;
 
 namespace FuryPlusPlus {
@@ -47,17 +46,24 @@ namespace FuryPlusPlus {
         internal static int LastSub8Pairs;
         internal static int LastEligibilityAdded;
         internal static string LastSolverImprovement;
+        internal static int LastSolverBatches;
 
         internal static string LanePackingStats;
         internal static string Sub8Stats;
         internal static string SolverStats;
         internal static string EligibilityStats;
 
-        /** EditorPrefs (string): semicolon-separated wildcard patterns of float params to 4-bit pack. */
-        internal const string Sub8ListKey = Settings.KeyPrefix + "module.compressorSub8.precisionList";
+        // Typed last-bake numbers behind the stats strings, for the settings-window chips.
+        internal static int ReportedSub8Pairs;
+        internal static int ReportedEligibilityAdded;
+        internal static int ReportedStockBatches;
+        internal static int ReportedPackedBatches;
+        internal static int ReportedSolverBatches;
 
-        /** EditorPrefs (string): semicolon-separated wildcard patterns of extra params to compress. */
-        internal const string EligibilityListKey = Settings.KeyPrefix + "module.compressorEligibility.extraList";
+        /** Bootstrap removed every patch (mid-session re-init); require a fresh install. */
+        internal static void NotifyUnpatched() {
+            installed = false;
+        }
 
         internal static void EnsureInstalled(Harmony harmony) {
             if (installed) return;
@@ -90,21 +96,19 @@ namespace FuryPlusPlus {
             LastSub8Pairs = 0;
         }
 
-        private static bool IsOn(Module module) {
-            return module != null && ModuleRegistry.IsActive(module) && module.Enabled;
-        }
-
         private static void ApplyPrefix() {
-            LanePackingActive = IsOn(CompressorLanePackingModule.Instance);
-            Sub8Active = IsOn(CompressorSub8Module.Instance);
+            LanePackingActive = ModuleRegistry.IsOn(CompressorLanePackingModule.Instance);
+            Sub8Active = ModuleRegistry.IsOn(CompressorSub8Module.Instance);
             Sub8Globs = Sub8Active
-                ? ParseGlobs(EditorPrefs.GetString(Sub8ListKey, ""))
+                ? Globs.Parse(Settings.GetListOption(
+                    CompressorSub8Module.Instance, CompressorSub8Module.PrecisionList))
                 : new List<Regex>();
             if (Sub8Globs.Count == 0) Sub8Active = false;
-            SolverActive = IsOn(CompressorSolverModule.Instance);
-            EligibilityActive = IsOn(CompressorEligibilityModule.Instance);
+            SolverActive = ModuleRegistry.IsOn(CompressorSolverModule.Instance);
+            EligibilityActive = ModuleRegistry.IsOn(CompressorEligibilityModule.Instance);
             EligibilityGlobs = EligibilityActive
-                ? ParseGlobs(EditorPrefs.GetString(EligibilityListKey, ""))
+                ? Globs.Parse(Settings.GetListOption(
+                    CompressorEligibilityModule.Instance, CompressorEligibilityModule.ExtraList))
                 : new List<Regex>();
             if (EligibilityGlobs.Count == 0) EligibilityActive = false;
             LastMovedBools = 0;
@@ -113,6 +117,7 @@ namespace FuryPlusPlus {
             LastSub8Pairs = 0;
             LastEligibilityAdded = 0;
             LastSolverImprovement = null;
+            LastSolverBatches = 0;
             RunActive = true;
         }
 
@@ -122,20 +127,25 @@ namespace FuryPlusPlus {
                 Log.Info($"Compressor lane packing: moved {LastMovedBools} trailing bool(s) into idle " +
                          $"int lanes ({LastStockBatches} → {LastPackedBatches} batches per sync).");
                 LanePackingStats = $"movedBools={LastMovedBools} batches={LastStockBatches}->{LastPackedBatches}";
+                ReportedStockBatches = LastStockBatches;
+                ReportedPackedBatches = LastPackedBatches;
             }
             if (LastSub8Pairs > 0) {
                 Log.Info($"Compressor sub-8-bit lanes: {LastSub8Pairs} float pair(s) share an int lane " +
                          "at 4-bit precision each.");
                 Sub8Stats = $"packedPairs={LastSub8Pairs}";
+                ReportedSub8Pairs = LastSub8Pairs;
             }
             if (LastEligibilityAdded > 0) {
                 Log.Info($"Compressor eligibility: {LastEligibilityAdded} listed parameter(s) added to " +
                          "the compressible set.");
                 EligibilityStats = $"extraParams={LastEligibilityAdded}";
+                ReportedEligibilityAdded = LastEligibilityAdded;
             }
             if (LastSolverImprovement != null) {
                 Log.Info("Compressor solver: " + LastSolverImprovement);
                 SolverStats = LastSolverImprovement;
+                ReportedSolverBatches = LastSolverBatches;
             }
             return __exception;
         }
@@ -248,17 +258,6 @@ namespace FuryPlusPlus {
                 result.Add((matching[i], matching[i + 1]));
             }
             return result;
-        }
-
-        internal static List<Regex> ParseGlobs(string raw) {
-            var globs = new List<Regex>();
-            foreach (var entry in raw.Split(';')) {
-                var trimmed = entry.Trim();
-                if (trimmed.Length == 0) continue;
-                var pattern = "^" + Regex.Escape(trimmed).Replace(@"\*", ".*").Replace(@"\?", ".") + "$";
-                globs.Add(new Regex(pattern, RegexOptions.CultureInvariant));
-            }
-            return globs;
         }
     }
 }

@@ -18,16 +18,12 @@ namespace FuryPlusPlus {
      *   the bake's build folder inside the retained batch would leave the following
      *   CreateAsset without a parent directory.
      */
-    internal sealed class SaveAssetsBatchingModule : Module {
-        internal static SaveAssetsBatchingModule Instance { get; private set; }
-
-        internal SaveAssetsBatchingModule() {
-            Instance = this;
-        }
+    internal sealed class SaveAssetsBatchingModule : Module<SaveAssetsBatchingModule> {
 
         internal override string Id => "saveAssetsBatching";
         internal override string DisplayName => "SaveAssets batching (Unity 2022)";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Asset saving";
         internal override string Description =>
             "Keeps the outer asset-editing batch active through SaveAssets on Unity 2022 instead of importing each generated asset individually.";
 

@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using System.Text;
@@ -19,9 +18,7 @@ namespace FuryPlusPlus {
      * machines, transitions, behaviours, motions and masks without inspecting every
      * serialized property on every node.
      */
-    internal sealed class FastControllerAssetGraphModule : Module {
-        internal static FastControllerAssetGraphModule Instance { get; private set; }
-
+    internal sealed class FastControllerAssetGraphModule : Module<FastControllerAssetGraphModule> {
         internal static readonly ModuleOption DeduplicateClipsOption = new ModuleOption(
             "deduplicateClips",
             "Deduplicate generated clips at save",
@@ -32,13 +29,10 @@ namespace FuryPlusPlus {
             DeduplicateClipsOption
         };
 
-        internal FastControllerAssetGraphModule() {
-            Instance = this;
-        }
-
         internal override string Id => "fastControllerAssetGraph";
         internal override string DisplayName => "Fast controller asset graph";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Asset saving";
         internal override string Description =>
             "Walks Unity's public controller graph to find unsaved children instead of VRCFury's SerializedObject scan.";
         internal override IReadOnlyList<ModuleOption> Options => AllOptions;
@@ -60,10 +54,6 @@ namespace FuryPlusPlus {
         private static MethodInfo rewriteInternals;
         private static FieldInfo extCurves;
         private static FieldInfo extOriginalSourceClip;
-        private static PropertyInfo curveIsFloat;
-        private static PropertyInfo curveFloatCurve;
-        private static PropertyInfo curveObjectCurve;
-        private static PropertyInfo[] clipSettingsProperties;
         [ThreadStatic] private static HashSet<Object> savedOrScheduled;
         [ThreadStatic] private static long lastStatsTicks;
         internal static string LastStats { get; private set; } = "none";
@@ -110,19 +100,7 @@ namespace FuryPlusPlus {
                 "originalSourceClip",
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
             );
-            var curveType = ReflectionUtils.FindType("VF.Utils.FloatOrObjectCurve");
-            curveIsFloat = curveType?.GetProperty(
-                "IsFloat",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
-            );
-            curveFloatCurve = curveType?.GetProperty(
-                "FloatCurve",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
-            );
-            curveObjectCurve = curveType?.GetProperty(
-                "ObjectCurve",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
-            );
+            ClipCurveCompat.EnsureResolved();
 
             var mutableManager = ReflectionUtils.FindType("VF.Utils.MutableManager");
             rewriteInternals = ReflectionUtils.FindUniqueMethod(
@@ -143,8 +121,10 @@ namespace FuryPlusPlus {
             if (getUnsavedChildren == null || SaveAssetsCompat.FactoryDidCreate == null || getUseOriginalClip == null
                                            || getClipExt == null || finalizeClip == null
                                            || extCurves == null || extOriginalSourceClip == null
-                                           || curveIsFloat == null || curveFloatCurve == null
-                                           || curveObjectCurve == null || rewriteInternals == null
+                                           || ClipCurveCompat.CurveIsFloat == null
+                                           || ClipCurveCompat.CurveFloatCurve == null
+                                           || ClipCurveCompat.CurveObjectCurve == null
+                                           || rewriteInternals == null
                                            || saveAssetsRun == null || saveMethods.Length < 3) {
                 throw new InvalidOperationException("target signature mismatch");
             }
@@ -411,119 +391,24 @@ namespace FuryPlusPlus {
             if (!ReferenceEquals(originalSource, clip)) return null;
             if (!(extCurves.GetValue(ext) is IDictionary curves)) return null;
 
+            // The serialized content itself comes from the shared ClipContentKey so this
+            // dedup and the controller-wide ClipDedupPass can never disagree on identity.
             var builder = new StringBuilder();
-            builder.Append("clip|")
-                .Append(Float(clip.frameRate)).Append('|')
-                .Append(clip.legacy).Append('|')
-                .Append(clip.wrapMode).Append('|');
-            AppendBounds(builder, clip.localBounds);
-
-            var settings = AnimationUtility.GetAnimationClipSettings(clip);
-            foreach (var property in GetClipSettingsProperties(settings.GetType())) {
-                builder.Append("setting|").Append(property.Name).Append('|')
-                    .Append(Value(property.GetValue(settings, null))).AppendLine();
-            }
-
-            foreach (var animationEvent in AnimationUtility.GetAnimationEvents(clip)) {
-                builder.Append("event|").Append(Float(animationEvent.time)).Append('|')
-                    .Append(animationEvent.functionName).Append('|')
-                    .Append(Float(animationEvent.floatParameter)).Append('|')
-                    .Append(animationEvent.intParameter).Append('|')
-                    .Append(animationEvent.stringParameter).Append('|')
-                    .Append(ObjectId(animationEvent.objectReferenceParameter)).Append('|')
-                    .Append(animationEvent.messageOptions).AppendLine();
-            }
+            ClipContentKey.AppendClipFacts(builder, clip);
 
             var entries = new List<(EditorCurveBinding Binding, object Curve)>();
             foreach (DictionaryEntry entry in curves) {
                 if (!(entry.Key is EditorCurveBinding binding) || entry.Value == null) return null;
                 entries.Add((binding, entry.Value));
             }
-            foreach (var entry in entries
-                         .OrderBy(value => value.Binding.path, StringComparer.Ordinal)
-                         .ThenBy(value => value.Binding.type?.AssemblyQualifiedName, StringComparer.Ordinal)
-                         .ThenBy(value => value.Binding.propertyName, StringComparer.Ordinal)
-                         .ThenBy(value => value.Binding.isPPtrCurve)
-                         .ThenBy(value => value.Binding.isDiscreteCurve)) {
-                var binding = entry.Binding;
-                var curve = entry.Curve;
-                var isFloat = (bool)curveIsFloat.GetValue(curve, null);
-                builder.Append(isFloat ? "float|" : "object|")
-                    .Append(binding.path).Append('|')
-                    .Append(binding.type?.AssemblyQualifiedName).Append('|')
-                    .Append(binding.propertyName).Append('|')
-                    .Append(binding.isPPtrCurve).Append('|')
-                    .Append(binding.isDiscreteCurve).AppendLine();
-
-                if (isFloat) {
-                    var animationCurve = curveFloatCurve.GetValue(curve, null) as AnimationCurve;
-                    if (animationCurve == null) return null;
-                    builder.Append("wrap|").Append(animationCurve.preWrapMode).Append('|')
-                        .Append(animationCurve.postWrapMode).AppendLine();
-                    foreach (var key in animationCurve.keys) {
-                        builder.Append("key|").Append(Float(key.time)).Append('|')
-                            .Append(Float(key.value)).Append('|')
-                            .Append(Float(key.inTangent)).Append('|')
-                            .Append(Float(key.outTangent)).Append('|')
-                            .Append(Float(key.inWeight)).Append('|')
-                            .Append(Float(key.outWeight)).Append('|')
-                            .Append(key.weightedMode).AppendLine();
-                    }
-                } else {
-                    var objectCurve = curveObjectCurve.GetValue(curve, null) as ObjectReferenceKeyframe[];
-                    if (objectCurve == null) return null;
-                    foreach (var key in objectCurve) {
-                        builder.Append("key|").Append(Float(key.time)).Append('|')
-                            .Append(ObjectId(key.value)).AppendLine();
-                    }
-                }
+            ClipContentKey.SortByBinding(entries, entry => entry.Binding);
+            foreach (var entry in entries) {
+                if (!ClipContentKey.TryAppendCurve(builder, entry.Binding, entry.Curve)) return null;
             }
 
             // The key only dedupes within one Collect call, so a fast non-cryptographic
             // hash is sufficient — no per-clip SHA256 instance and hex-string churn.
             return Hash128.Compute(builder.ToString()).ToString();
-        }
-
-        private static PropertyInfo[] GetClipSettingsProperties(Type type) {
-            // AnimationUtility.GetAnimationClipSettings always returns the same type.
-            if (clipSettingsProperties == null) {
-                clipSettingsProperties = type
-                    .GetProperties(BindingFlags.Instance | BindingFlags.Public)
-                    .Where(property => property.CanRead && property.GetIndexParameters().Length == 0)
-                    .OrderBy(property => property.Name, StringComparer.Ordinal)
-                    .ToArray();
-            }
-            return clipSettingsProperties;
-        }
-
-        private static string Float(float value) {
-            return value.ToString("R", CultureInfo.InvariantCulture);
-        }
-
-        private static string Value(object value) {
-            if (value == null) return "<null>";
-            if (value is Object unityObject) return ObjectId(unityObject);
-            if (value is IFormattable formatted) {
-                return formatted.ToString(null, CultureInfo.InvariantCulture);
-            }
-            return value.ToString();
-        }
-
-        private static string ObjectId(Object value) {
-            if (value == null) return "<null>";
-            if (AssetDatabase.TryGetGUIDAndLocalFileIdentifier(value, out string guid, out long localId)) {
-                return guid + ":" + localId;
-            }
-            return "instance:" + value.GetInstanceID();
-        }
-
-        private static void AppendBounds(StringBuilder builder, Bounds bounds) {
-            builder.Append(Float(bounds.center.x)).Append(',')
-                .Append(Float(bounds.center.y)).Append(',')
-                .Append(Float(bounds.center.z)).Append('|')
-                .Append(Float(bounds.extents.x)).Append(',')
-                .Append(Float(bounds.extents.y)).Append(',')
-                .Append(Float(bounds.extents.z)).AppendLine();
         }
 
         private static void PushChildren(

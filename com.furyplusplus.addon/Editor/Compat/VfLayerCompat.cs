@@ -12,6 +12,9 @@ namespace FuryPlusPlus {
         /** VFLayer's backing AnimatorStateMachine field; the identity key for per-layer caches. */
         internal static FieldInfo RootStateMachineField { get; private set; }
 
+        /** VFLayer's owning-controller field (VFLayer.ctrl). */
+        internal static FieldInfo CtrlField { get; private set; }
+
         /** The nonpublic allBehaviourContainers property getter (the shared patched getter). */
         internal static MethodInfo BehaviourContainersGetter { get; private set; }
 
@@ -22,6 +25,8 @@ namespace FuryPlusPlus {
             var vfLayerType = ReflectionUtils.FindType("VF.Utils.Controller.VFLayer");
             RootStateMachineField = vfLayerType?
                 .GetField("rootStateMachine", BindingFlags.Instance | BindingFlags.NonPublic);
+            CtrlField = vfLayerType?
+                .GetField("ctrl", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
             BehaviourContainersGetter = vfLayerType?
                 .GetProperty("allBehaviourContainers", BindingFlags.Instance | BindingFlags.NonPublic)?
                 .GetGetMethod(true);

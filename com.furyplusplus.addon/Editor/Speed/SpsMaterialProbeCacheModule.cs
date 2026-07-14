@@ -15,16 +15,12 @@ namespace FuryPlusPlus {
      * bounded across material churn and a future generation bump only has to delete a
      * single known key.
      */
-    internal sealed class SpsMaterialProbeCacheModule : Module {
-        internal static SpsMaterialProbeCacheModule Instance { get; private set; }
-
-        internal SpsMaterialProbeCacheModule() {
-            Instance = this;
-        }
+    internal sealed class SpsMaterialProbeCacheModule : Module<SpsMaterialProbeCacheModule> {
 
         internal override string Id => "spsMaterialProbeCache";
         internal override string DisplayName => "SPS material probe cache";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "SPS";
         internal override string Description =>
             "Caches DPS/TPS material probe results for clean persistent materials across bakes.";
 

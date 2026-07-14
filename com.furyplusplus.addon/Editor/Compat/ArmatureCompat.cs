@@ -18,14 +18,15 @@ namespace FuryPlusPlus {
         internal static MethodInfo GetConstraintsMethod { get; private set; }
         internal static MethodInfo RemoveFromPhysbones { get; private set; }
 
-        private static FieldInfo gameObjectField;
         private static bool resolved;
 
         internal static bool ArmatureLinkAvailable =>
-            ArmatureLinkApply != null && ArmatureLinkAvatarField != null && gameObjectField != null;
+            ArmatureLinkApply != null && ArmatureLinkAvatarField != null
+            && VfGameObjectCompat.GameObjectField != null;
 
         internal static bool HapticSocketsAvailable =>
-            HapticSocketsApply != null && HapticSocketsAvatarField != null && gameObjectField != null;
+            HapticSocketsApply != null && HapticSocketsAvatarField != null
+            && VfGameObjectCompat.GameObjectField != null;
 
         internal static void EnsureResolved() {
             if (resolved) return;
@@ -45,11 +46,8 @@ namespace FuryPlusPlus {
                 BindingFlags.Instance | BindingFlags.NonPublic
             );
 
-            VfGameObjectType = ReflectionUtils.FindType("VF.Utils.VFGameObject");
-            gameObjectField = VfGameObjectType?.GetField(
-                "_gameObject",
-                BindingFlags.Instance | BindingFlags.NonPublic
-            );
+            VfGameObjectCompat.EnsureResolved();
+            VfGameObjectType = VfGameObjectCompat.VfGameObjectType;
             GetConstraintsMethod = ReflectionUtils.FindUniqueMethod(
                 VfGameObjectType,
                 "GetConstraints",
@@ -76,8 +74,7 @@ namespace FuryPlusPlus {
         }
 
         internal static GameObject GetGameObject(object vfGameObject) {
-            if (vfGameObject == null || gameObjectField == null) return null;
-            return gameObjectField.GetValue(vfGameObject) as GameObject;
+            return VfGameObjectCompat.Unwrap(vfGameObject);
         }
 
         internal static GameObject GetAvatar(object serviceInstance, FieldInfo avatarField) {

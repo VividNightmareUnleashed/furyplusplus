@@ -61,6 +61,58 @@ namespace FuryPlusPlus.Tests.Editor {
         }
 
         [Test]
+        public void OutputConfigIgnoresCosmeticModules() {
+            // Toggling a cosmetic module must never invalidate bake-cache snapshots.
+            var cosmetic = ModuleRegistry.ByKind(ModuleKind.Cosmetic).First();
+            var key = Settings.ModuleKey(cosmetic);
+            var had = UnityEditor.EditorPrefs.HasKey(key);
+            var previous = had && UnityEditor.EditorPrefs.GetBool(key, cosmetic.DefaultEnabled);
+            try {
+                Settings.SetModuleEnabled(cosmetic, true);
+                var whenOn = ModuleRegistry.DescribeOutputConfig();
+                Settings.SetModuleEnabled(cosmetic, false);
+                var whenOff = ModuleRegistry.DescribeOutputConfig();
+                Assert.That(whenOn, Is.EqualTo(whenOff),
+                    "cosmetic toggles must not churn the bake-cache config key");
+                Assert.That(whenOn, Does.Not.Contain(cosmetic.Id));
+            } finally {
+                if (had) Settings.SetModuleEnabled(cosmetic, previous);
+                else UnityEditor.EditorPrefs.DeleteKey(key);
+            }
+        }
+
+        [Test]
+        public void OutputConfigTracksListOptions() {
+            // The compressor precision list changes bake output, so it must feed the key.
+            var module = ModuleRegistry.All.First(candidate => candidate.ListOptions.Count > 0);
+            var option = module.ListOptions[0];
+            var key = option.KeyFor(module);
+            var had = UnityEditor.EditorPrefs.HasKey(key);
+            var previous = Settings.GetListOption(module, option);
+            var moduleKey = Settings.ModuleKey(module);
+            var hadModule = UnityEditor.EditorPrefs.HasKey(moduleKey);
+            var moduleWasOn = hadModule && UnityEditor.EditorPrefs.GetBool(moduleKey, module.DefaultEnabled);
+            if (!ModuleRegistry.IsActive(module)) {
+                Assert.Ignore("module not installed (VRCFury absent or incompatible)");
+            }
+            try {
+                Settings.SetModuleEnabled(module, true);
+                Settings.SetListOption(module, option, "TestParam/*");
+                var withList = ModuleRegistry.DescribeOutputConfig();
+                Settings.SetListOption(module, option, "");
+                var withoutList = ModuleRegistry.DescribeOutputConfig();
+                Assert.That(withList, Is.Not.EqualTo(withoutList),
+                    "list-setting edits change bake output and must invalidate the config key");
+                Assert.That(withList, Does.Contain("TestParam/*"));
+            } finally {
+                if (had) Settings.SetListOption(module, option, previous);
+                else UnityEditor.EditorPrefs.DeleteKey(key);
+                if (hadModule) Settings.SetModuleEnabled(module, moduleWasOn);
+                else UnityEditor.EditorPrefs.DeleteKey(moduleKey);
+            }
+        }
+
+        [Test]
         public void QualityModulesRequireExactVersion() {
             foreach (var module in ModuleRegistry.All) {
                 if (module.Kind == ModuleKind.Quality) {

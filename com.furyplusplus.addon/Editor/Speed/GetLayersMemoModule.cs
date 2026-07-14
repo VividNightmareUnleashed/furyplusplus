@@ -18,16 +18,12 @@ namespace FuryPlusPlus {
      * write site, plus a full clear at every action boundary and build begin/end as the
      * backstop for anything unenumerated.
      */
-    internal sealed class GetLayersMemoModule : Module {
-        internal static GetLayersMemoModule Instance { get; private set; }
-
-        internal GetLayersMemoModule() {
-            Instance = this;
-        }
+    internal sealed class GetLayersMemoModule : Module<GetLayersMemoModule> {
 
         internal override string Id => "getLayersMemo";
         internal override string DisplayName => "Controller layer-list cache";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Controllers & animation";
         internal override string Description =>
             "Caches VFController.GetLayers() between mutations, avoiding a native marshal " +
             "of every layer per call.";
@@ -50,15 +46,15 @@ namespace FuryPlusPlus {
         private static FieldInfo vfLayerCtrlField;
 
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
-            const BindingFlags any = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
             var vfControllerType = ReflectionUtils.Demand(
                 ReflectionUtils.FindType("VF.Utils.Controller.VFController"), "VF.Utils.Controller.VFController");
             var vfLayerType = ReflectionUtils.Demand(
                 ReflectionUtils.FindType("VF.Utils.Controller.VFLayer"), "VF.Utils.Controller.VFLayer");
+            ClipCurveCompat.EnsureResolved();
+            VfLayerCompat.EnsureResolved();
             vfControllerCtrlField = ReflectionUtils.Demand(
-                vfControllerType.GetField("ctrl", any), "VFController.ctrl");
-            vfLayerCtrlField = ReflectionUtils.Demand(
-                vfLayerType.GetField("ctrl", any), "VFLayer.ctrl");
+                ClipCurveCompat.ControllerCtrlField, "VFController.ctrl");
+            vfLayerCtrlField = ReflectionUtils.Demand(VfLayerCompat.CtrlField, "VFLayer.ctrl");
 
             var getLayers = ReflectionUtils.Demand(
                 ReflectionUtils.FindUniqueMethod(vfControllerType, "GetLayers",

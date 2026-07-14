@@ -70,8 +70,10 @@ namespace FuryPlusPlus {
             new CompressorSub8Module(),
             // --- Experimental play-mode iteration; all default OFF ---
             new PlayModeNoDiskSaveModule(),
+            // Both bake-cache modules are independent participants of the shared
+            // BakeChainAnchor; install order = dispatch order (telemetry logs its verdict
+            // before replay can skip the chain).
             new BakeCacheDryRunModule(),
-            // Replay shares the dry-run module's chain anchor; must install after it.
             new BakeCacheReplayModule(),
             // --- UI: keeps the liquid progress bar animating inside long phases ---
             new ProgressPumpModule(),
@@ -114,6 +116,11 @@ namespace FuryPlusPlus {
             return GetStatus(module).State == ModuleState.Installed;
         }
 
+        /** Null-safe "installed for this domain load AND switched on". */
+        internal static bool IsOn(Module module) {
+            return module != null && IsActive(module) && module.Enabled;
+        }
+
         internal static Module Find(string id) {
             return All.FirstOrDefault(module => module.Id == id);
         }
@@ -124,8 +131,8 @@ namespace FuryPlusPlus {
 
         /**
          * Compact per-module state summary for the profiler report footer. Sub-option states
-         * ride along as id=on[opt1=on,opt2=off] because this string also feeds the bake-cache
-         * config hash: an option flip changes bake output, so it must invalidate the cache.
+         * ride along as id=on[opt1=on,opt2=off]. Human report line only — the bake-cache
+         * config hash reads DescribeOutputConfig instead.
          */
         internal static string DescribeStates() {
             var builder = new StringBuilder();
@@ -141,6 +148,49 @@ namespace FuryPlusPlus {
                         .Append(Settings.IsOptionEnabled(module, module.Options[i]) ? "on" : "off");
                 }
                 if (module.Options.Count > 0) builder.Append(']');
+            }
+            return builder.Length > 0 ? builder.ToString() : "(no modules)";
+        }
+
+        /**
+         * Bake-output-relevant config only — the bake-cache config-hash input. Quality/Pass
+         * modules contribute their effective state plus every option; Speed/Cosmetic modules
+         * contribute only when they declare an output-affecting option (bug-fix sub-toggles,
+         * play-mode skips) or a list setting, so a cosmetic or pure-speed toggle never
+         * invalidates a snapshot. List settings ride along normalized.
+         */
+        internal static string DescribeOutputConfig() {
+            var builder = new StringBuilder();
+            foreach (var module in All) {
+                var alwaysRelevant = module.Kind == ModuleKind.Quality || module.Kind == ModuleKind.Pass;
+                var relevant = alwaysRelevant;
+                if (!relevant) {
+                    foreach (var option in module.Options) {
+                        if (option.AffectsBakeOutput) { relevant = true; break; }
+                    }
+                    if (module.ListOptions.Count > 0) relevant = true;
+                }
+                if (!relevant) continue;
+
+                var on = IsOn(module);
+                if (builder.Length > 0) builder.Append(", ");
+                builder.Append(module.Id).Append('=').Append(on ? "on" : "off");
+                if (!on) continue; // a disabled module's options can't affect output
+
+                var first = true;
+                foreach (var option in module.Options) {
+                    if (!alwaysRelevant && !option.AffectsBakeOutput) continue;
+                    builder.Append(first ? '[' : ',').Append(option.Suffix).Append('=')
+                        .Append(Settings.IsOptionEnabled(module, option) ? "on" : "off");
+                    first = false;
+                }
+                foreach (var option in module.ListOptions) {
+                    builder.Append(first ? '[' : ',').Append(option.Suffix).Append('=')
+                        .Append('\'').Append(Globs.Normalize(Settings.GetListOption(module, option)))
+                        .Append('\'');
+                    first = false;
+                }
+                if (!first) builder.Append(']');
             }
             return builder.Length > 0 ? builder.ToString() : "(no modules)";
         }

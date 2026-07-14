@@ -26,16 +26,12 @@ namespace FuryPlusPlus {
      *    FX clip AAP-writes nor AAP-write anything themselves, so moving content earlier
      *    in evaluation order cannot change same-frame dataflow.
      */
-    internal sealed class DbtConsolidationModule : Module {
-        internal static DbtConsolidationModule Instance { get; private set; }
-
-        internal DbtConsolidationModule() {
-            Instance = this;
-        }
+    internal sealed class DbtConsolidationModule : Module<DbtConsolidationModule> {
 
         internal override string Id => "dbtConsolidation";
         internal override string DisplayName => "Consolidate blendtree layers";
         internal override ModuleKind Kind => ModuleKind.Quality;
+        internal override string SettingsGroup => "Animator layers";
         internal override CompatTier RequiredTier => CompatTier.ExactVersion;
         internal override string Description =>
             "Merges VRCFury's separate single-state direct-blendtree FX layers into one, " +
@@ -49,10 +45,17 @@ namespace FuryPlusPlus {
         internal override string ReportStats() {
             return DbtConsolidationPass.LastStats;
         }
+
+        internal override (string Text, string Tooltip)? ReportGain(Estimators.Result? analysis) {
+            return DbtConsolidationPass.LastMergedLayers > 0
+                ? ($"-{DbtConsolidationPass.LastMergedLayers} layers last bake", DbtConsolidationPass.LastStats)
+                : ((string, string)?)null;
+        }
     }
 
     internal static class DbtConsolidationPass {
         internal static string LastStats;
+        internal static int LastMergedLayers;
 
         private static MethodInfo getFx;
         private static MethodInfo getLayers;
@@ -63,68 +66,34 @@ namespace FuryPlusPlus {
         private static PropertyInfo layerWeight;
         private static PropertyInfo layerMask;
         private static PropertyInfo layerName;
-        private static Type clipsIteratorType;
-        private static MethodInfo clipsFrom;
-        private static MethodInfo getAllBindings;
 
         internal static void Resolve() {
-            var controllersServiceType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Service.ControllersService"), "VF.Service.ControllersService");
-            var layerToTreeType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Service.LayerToTreeService"), "VF.Service.LayerToTreeService");
             var layerType = ReflectionUtils.Demand(
                 ReflectionUtils.FindType("VF.Utils.Controller.VFLayer"), "VF.Utils.Controller.VFLayer");
-            var vfControllerType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Utils.Controller.VFController"), "VF.Utils.Controller.VFController");
-            var layerControlType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Service.AnimatorLayerControlOffsetService"),
-                "VF.Service.AnimatorLayerControlOffsetService");
-            var clipExtType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Utils.AnimationClipExtensions"), "VF.Utils.AnimationClipExtensions");
 
             VfLayerCompat.EnsureResolved();
+            ReflectionUtils.Demand(VfLayerCompat.RootStateMachineField, "VFLayer.rootStateMachine");
 
-            const BindingFlags any = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-            getFx = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(controllersServiceType, "GetFx",
-                    method => method.GetParameters().Length == 0),
-                "ControllersService.GetFx()");
-            getLayers = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(vfControllerType, "GetLayers",
-                    method => method.GetParameters().Length == 0),
-                "VFController.GetLayers()");
+            ToggleTreeCompat.EnsureResolved();
+            getFx = ReflectionUtils.Demand(ToggleTreeCompat.GetFx, "ControllersService.GetFx()");
+            getLayers = ReflectionUtils.Demand(ToggleTreeCompat.GetLayers, "VFController.GetLayers()");
             getBindingsAnimatedInLayer = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(layerToTreeType, "GetBindingsAnimatedInLayer",
-                    method => method.GetParameters().Length == 1),
+                ToggleTreeCompat.GetBindingsAnimatedInLayer,
                 "LayerToTreeService.GetBindingsAnimatedInLayer(VFLayer)");
             getDefaultLayer = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(
-                    ReflectionUtils.FindType("VF.Service.FixWriteDefaultsService"),
-                    "GetDefaultLayer",
-                    method => method.GetParameters().Length == 0),
-                "FixWriteDefaultsService.GetDefaultLayer()");
+                ToggleTreeCompat.GetDefaultLayer, "FixWriteDefaultsService.GetDefaultLayer()");
             isLayerTargeted = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(layerControlType, "IsLayerTargeted",
-                    method => method.GetParameters().Length == 1),
-                "AnimatorLayerControlOffsetService.IsLayerTargeted(VFLayer)");
-            layerRemove = ReflectionUtils.Demand(
-                ReflectionUtils.FindNoArgVoid(layerType, "Remove"), "VFLayer.Remove()");
-            layerWeight = ReflectionUtils.Demand(layerType.GetProperty("weight", any), "VFLayer.weight");
+                ToggleTreeCompat.IsLayerTargeted, "AnimatorLayerControlOffsetService.IsLayerTargeted(VFLayer)");
+            layerRemove = ReflectionUtils.Demand(ToggleTreeCompat.LayerRemove, "VFLayer.Remove()");
+            layerWeight = ReflectionUtils.Demand(ToggleTreeCompat.LayerWeight, "VFLayer.weight");
+            layerName = ReflectionUtils.Demand(ToggleTreeCompat.LayerName, "VFLayer.name");
+            // mask is this pass's own extra member — the area holder carries the shared set.
+            const BindingFlags any = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
             layerMask = ReflectionUtils.Demand(layerType.GetProperty("mask", any), "VFLayer.mask");
-            layerName = ReflectionUtils.Demand(layerType.GetProperty("name", any), "VFLayer.name");
 
-            clipsIteratorType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Utils.AnimatorIterator+Clips"), "VF.Utils.AnimatorIterator+Clips");
-            clipsFrom = ReflectionUtils.Demand(
-                clipsIteratorType.GetMethods(any)
-                    .SingleOrDefault(method => method.Name == "From"
-                                               && method.GetParameters().Length == 1
-                                               && method.GetParameters()[0].ParameterType == vfControllerType),
-                "AnimatorIterator.Clips.From(VFController)");
-            getAllBindings = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(clipExtType, "GetAllBindings",
-                    method => method.GetParameters().Length == 1),
-                "AnimationClipExtensions.GetAllBindings(clip)");
+            ClipCurveCompat.DemandCore();
+            ReflectionUtils.Demand(ClipCurveCompat.ClipsFromController, "AnimatorIterator.Clips.From(VFController)");
+            ReflectionUtils.Demand(ClipCurveCompat.GetAllBindings, "AnimationClipExtensions.GetAllBindings(clip)");
         }
 
         internal static void Run() {
@@ -141,10 +110,10 @@ namespace FuryPlusPlus {
 
                 // Params AAP-written by any FX clip: candidates must not touch these at all.
                 var aapWritten = new HashSet<string>();
-                var iterator = Activator.CreateInstance(clipsIteratorType);
-                foreach (var clipObj in (IEnumerable)clipsFrom.Invoke(iterator, new[] { fx })) {
+                foreach (var clipObj in ClipCurveCompat.ClipsFrom(fx)) {
                     if (!(clipObj is AnimationClip clip)) continue;
-                    foreach (EditorCurveBinding binding in (Array)getAllBindings.Invoke(null, new object[] { clip })) {
+                    foreach (EditorCurveBinding binding in
+                             (Array)ClipCurveCompat.GetAllBindings.Invoke(null, new object[] { clip })) {
                         if (binding.type == typeof(Animator) && string.IsNullOrEmpty(binding.path)) {
                             aapWritten.Add(binding.propertyName);
                         }
@@ -183,6 +152,7 @@ namespace FuryPlusPlus {
 
                 if (candidates.Count < 2) {
                     LastStats = null;
+                    LastMergedLayers = 0;
                     return;
                 }
 
@@ -203,6 +173,7 @@ namespace FuryPlusPlus {
                     ReflectionUtils.InvokeUnwrapped(layerRemove, donor, null);
                 }
 
+                LastMergedLayers = merged.Count;
                 if (merged.Count > 0) {
                     Log.Info($"Consolidated {merged.Count + 1} direct-blendtree layers into one " +
                              $"(\"{layerName.GetValue(target.Layer)}\").");

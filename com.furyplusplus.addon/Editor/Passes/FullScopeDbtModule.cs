@@ -14,16 +14,12 @@ namespace FuryPlusPlus {
      * through its own supported path and runs its own ~11 conversion guards per user layer;
      * the clone is destroyed after the build, so nothing persists on the source avatar.
      */
-    internal sealed class FullScopeDbtModule : Module {
-        internal static FullScopeDbtModule Instance { get; private set; }
-
-        internal FullScopeDbtModule() {
-            Instance = this;
-        }
+    internal sealed class FullScopeDbtModule : Module<FullScopeDbtModule> {
 
         internal override string Id => "fullScopeDbt";
         internal override string DisplayName => "Optimize user FX layers into blendtrees";
         internal override ModuleKind Kind => ModuleKind.Quality;
+        internal override string SettingsGroup => "Animator layers";
         internal override CompatTier RequiredTier => CompatTier.ExactVersion;
         internal override string Description =>
             "Extends VRCFury's layer-to-blendtree pass to hand-authored FX layers (same effect " +
@@ -32,6 +28,14 @@ namespace FuryPlusPlus {
 
         internal override void Install(Harmony harmony, VrcfuryCompat compat) {
             FullScopeDbtPass.Resolve();
+        }
+
+        internal override (string Text, string Tooltip)? ReportGain(Estimators.Result? analysis) {
+            return analysis?.FxLayers > 1
+                ? ($"{analysis.Value.FxLayers} FX layers → blendtree",
+                    "Eligible toggle layers merge into a single direct-blendtree layer; " +
+                    "the exact count depends on per-layer eligibility.")
+                : ((string, string)?)null;
         }
     }
 

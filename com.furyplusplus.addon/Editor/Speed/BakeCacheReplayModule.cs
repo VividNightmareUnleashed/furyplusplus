@@ -19,9 +19,7 @@ namespace FuryPlusPlus {
      * open to a normal bake; a failure after that point is loud, still skips the chain
      * (baking a half-restored avatar is worse), and deletes the snapshot so it cannot recur.
      */
-    internal sealed class BakeCacheReplayModule : Module {
-        internal static BakeCacheReplayModule Instance { get; private set; }
-
+    internal sealed class BakeCacheReplayModule : Module<BakeCacheReplayModule> {
         internal static readonly ModuleOption CaptureOnly = new ModuleOption(
             "captureOnly",
             "Capture snapshots but never replay (validation)",
@@ -32,15 +30,12 @@ namespace FuryPlusPlus {
 
         private static readonly ModuleOption[] options = { CaptureOnly };
 
-        internal BakeCacheReplayModule() {
-            Instance = this;
-        }
-
         internal override string Id => "bakeCacheReplay";
         internal override string DisplayName => "Bake cache replay (⚗️EXPERIMENTAL)";
         internal override ModuleKind Kind => ModuleKind.Speed;
         internal override CompatTier RequiredTier => CompatTier.ExactVersion;
         internal override bool DefaultEnabled => false;
+        internal override string SettingsGroup => "Play-mode iteration";
         internal override IReadOnlyList<ModuleOption> Options => options;
         internal override string Description =>
             "EXPERIMENTAL. When nothing that could influence the bake has changed since the " +
@@ -57,27 +52,116 @@ namespace FuryPlusPlus {
             "hierarchy; AudioLink's play-mode refresh is skipped on replayed bakes.";
 
         internal override void Install(Harmony harmony, VrcfuryCompat compat) {
-            var dryRun = ModuleRegistry.Find("bakeCacheDryRun");
-            if (dryRun == null || !ModuleRegistry.IsActive(dryRun)) {
-                throw new MissingMemberException(
-                    "requires the bake-cache telemetry module (shared preprocess-chain anchor)");
-            }
-            NdmfCompat.EnsureResolved(); // fail-soft: absence is fine, resolution is not risky
+            BakeChainAnchor.EnsureInstalled(harmony);
+            BakeChainAnchor.Register(BakeCacheReplayPatch.Participant.Singleton);
             BakeCacheSnapshotStore.Init();
         }
 
         internal override string ReportStats() => BakeCacheReplayPatch.DescribeStats();
+
+        internal override (string Text, string Tooltip)? ReportGain(Estimators.Result? analysis) {
+            return BakeCacheReplayPatch.Replays > 0
+                ? ($"replayed {BakeCacheReplayPatch.Replays} bakes " +
+                   $"(~{BakeCacheReplayPatch.SavedSeconds.ToString("0.0", CultureInfo.InvariantCulture)}s saved)",
+                    "Play-mode bakes skipped by restoring the cached processed avatar.")
+                : ((string, string)?)null;
+        }
+
+        internal override void DrawExtraSettings() {
+            using (new EditorGUILayout.HorizontalScope()) {
+                GUILayout.Space(18f);
+                if (GUILayout.Button(
+                        new GUIContent("Clear bake cache",
+                            "Deletes every cached snapshot and fingerprint record; the next " +
+                            "play-mode bake starts from scratch."),
+                        GUILayout.Width(130f))) {
+                    BakeCacheSnapshotStore.ClearAll();
+                }
+                GUILayout.FlexibleSpace();
+            }
+        }
     }
 
     internal static class BakeCacheReplayPatch {
         private static int replays;
         private static double savedSeconds;
 
+        internal static int Replays => replays;
+        internal static double SavedSeconds => savedSeconds;
+
         internal static string DescribeStats() {
             return replays == 0
                 ? null
                 : "replays=" + replays + " savedSeconds="
                   + savedSeconds.ToString("0.0", CultureInfo.InvariantCulture);
+        }
+
+        /**
+         * The capture/replay side of the shared chain anchor. Everything destructive lives
+         * in TryReplay; a start-side failure of any kind falls open to a normal bake.
+         */
+        internal sealed class Participant : BakeChainAnchor.Participant {
+            internal static readonly Participant Singleton = new Participant();
+
+            private static readonly HashSet<string> IneligibleLogged = new HashSet<string>();
+            /** A still-valid snapshot exists (capture-only mode) — skip the re-capture. */
+            private bool snapshotStillValid;
+
+            internal override bool Enabled => ModuleRegistry.IsOn(BakeCacheReplayModule.Instance);
+
+            internal override bool OnChainStart(BakeChainAnchor.ChainContext context) {
+                snapshotStillValid = false;
+                var fingerprint = context.Fingerprint;
+                var avatarObject = context.Avatar;
+                if (!fingerprint.ReplayEligible) {
+                    if (IneligibleLogged.Add(context.Key)) {
+                        var reason = fingerprint.ExternalSceneRefs.Count > 0
+                            ? "it references scene objects outside the avatar ("
+                              + string.Join(", ", fingerprint.ExternalSceneRefs.GetRange(
+                                  0, Math.Min(3, fingerprint.ExternalSceneRefs.Count))) + ")"
+                            : "it references NDMF/MA-generated assets before the chain ran (leaked state)";
+                        Log.Info($"Bake cache: '{avatarObject.name}' cannot be replay-cached — {reason}.");
+                    }
+                    return false;
+                }
+
+                if (BakeCacheSnapshotStore.TryLoad(context.Key, fingerprint, out var snapshot)) {
+                    if (Settings.IsOptionEnabled(
+                            BakeCacheReplayModule.Instance, BakeCacheReplayModule.CaptureOnly)) {
+                        snapshotStillValid = true; // still fresh; skip the re-capture
+                        Log.Info($"Bake cache: would have REPLAYED '{avatarObject.name}' " +
+                                 $"(~{snapshot.Meta.chainSeconds:F1}s) — capture-only validation " +
+                                 "mode, chain runs normally.");
+                        return false;
+                    }
+                    if (TryReplay(avatarObject, snapshot)) return true;
+                    // TryReplay pre-destructive failure: snapshot is suspect, fall through
+                    // to a normal bake and let the chain-success capture refresh it.
+                }
+                return false;
+            }
+
+            internal override void OnChainSuccess(BakeChainAnchor.ChainContext context) {
+                if (snapshotStillValid || !context.Fingerprint.ReplayEligible) return;
+                try {
+                    BakeCacheSnapshotStore.Capture(
+                        context.Avatar, context.Key, context.Fingerprint, context.ChainSeconds);
+                } catch (Exception e) {
+                    Log.Warn("Bake cache: snapshot capture failed (bake unaffected): " + e.Message);
+                }
+            }
+
+            internal override void OnPlayModeChanged(PlayModeStateChange state) {
+                if (state == PlayModeStateChange.ExitingPlayMode
+                    || state == PlayModeStateChange.EnteredEditMode) {
+                    IneligibleLogged.Clear();
+                }
+                // The replay leaves its progress bar up through the silent play transition.
+                if (state == PlayModeStateChange.EnteredPlayMode
+                    || state == PlayModeStateChange.EnteredEditMode) {
+                    EditorUtility.ClearProgressBar();
+                }
+            }
         }
 
         /**

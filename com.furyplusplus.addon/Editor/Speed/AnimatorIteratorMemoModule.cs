@@ -28,26 +28,22 @@ namespace FuryPlusPlus {
      *  - Shadow validation: a sample of cache hits recomputes the walk and compares; any
      *    mismatch logs, flushes, and disables the cache for the session.
      */
-    internal sealed class AnimatorIteratorMemoModule : Module {
-        internal static AnimatorIteratorMemoModule Instance { get; private set; }
-
+    internal sealed class AnimatorIteratorMemoModule : Module<AnimatorIteratorMemoModule> {
         internal static readonly ModuleOption ShadowValidation = new ModuleOption(
             "shadowValidation", "Shadow-validate cache hits (recommended during soak)", true,
             "Recomputes ~1/64 of cache hits and verifies them; a mismatch disables the cache.");
 
-        internal AnimatorIteratorMemoModule() {
-            Instance = this;
-        }
+        private static readonly ModuleOption[] AllOptions = { ShadowValidation };
 
         internal override string Id => "animatorIteratorMemo";
         internal override string DisplayName => "Motion graph traversal cache";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Controllers & animation";
         internal override string Description =>
             "Caches VRCFury's repeated motion-graph walks (the biggest uncached cost in a " +
             "build), invalidated at every tree mutation.";
 
-        internal override System.Collections.Generic.IReadOnlyList<ModuleOption> Options =>
-            new[] { ShadowValidation };
+        internal override System.Collections.Generic.IReadOnlyList<ModuleOption> Options => AllOptions;
 
         internal override void Install(Harmony harmony, VrcfuryCompat compat) {
             AnimatorIteratorMemoPatch.Install(harmony, compat);
@@ -232,11 +228,7 @@ namespace FuryPlusPlus {
             if (reverse == null) return;
             foreach (Motion member in (IEnumerable)__result) {
                 if (member == null) continue;
-                if (!reverse.TryGetValue(member, out var roots)) {
-                    roots = new List<Motion>();
-                    reverse[member] = roots;
-                }
-                roots.Add(root);
+                reverse.GetOrAddList(member).Add(root);
             }
         }
 

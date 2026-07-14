@@ -24,16 +24,12 @@ namespace FuryPlusPlus {
      * first repaint failure. Phases that never hit a pump site still freeze — with a
      * blocked main thread that part is physics.
      */
-    internal sealed class ProgressPumpModule : Module {
-        internal static ProgressPumpModule Instance { get; private set; }
-
-        internal ProgressPumpModule() {
-            Instance = this;
-        }
+    internal sealed class ProgressPumpModule : Module<ProgressPumpModule> {
 
         internal override string Id => "progressPump";
         internal override string DisplayName => "Animate progress bar during long phases";
         internal override ModuleKind Kind => ModuleKind.Cosmetic;
+        internal override string SettingsGroup => "Editor visuals";
         internal override CompatTier RequiredTier => CompatTier.Profiling;
         internal override string Description =>
             "Repaints the build progress window from inside VRCFury's long-running phases " +
@@ -86,17 +82,7 @@ namespace FuryPlusPlus {
 
             var pump = new HarmonyMethod(typeof(ProgressPumpPatch), nameof(PumpPrefix));
             harmony.Patch(compat.ActionCall, prefix: pump);
-            foreach (var (typeName, methodNames) in PumpTargets) {
-                foreach (var methodName in methodNames) {
-                    foreach (var method in ReflectionUtils.FindDeclaredMethods(typeName, methodName)) {
-                        try {
-                            harmony.Patch(method, prefix: pump);
-                        } catch (Exception e) {
-                            Log.Warn($"Progress pump skipped {typeName}.{methodName}: {e.Message}");
-                        }
-                    }
-                }
-            }
+            PatchUtils.PatchAllBestEffort(harmony, PumpTargets, pump, null, "Progress pump skipped");
         }
 
         /**
@@ -105,8 +91,7 @@ namespace FuryPlusPlus {
          * the hot prefix below only ever looks at statics.
          */
         internal static void RegisterWindow(EditorWindow window) {
-            var module = ProgressPumpModule.Instance;
-            if (module == null || !ModuleRegistry.IsActive(module) || !module.Enabled) return;
+            if (!ModuleRegistry.IsOn(ProgressPumpModule.Instance)) return;
             RepaintsThisWindow = 0;
             lastPumpTimestamp = 0;
             target = new WeakReference<EditorWindow>(window);

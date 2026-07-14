@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using UnityEditor.Animations;
 using VRC.SDK3.Avatars.Components;
@@ -5,10 +6,12 @@ using VRC.SDK3.Avatars.ScriptableObjects;
 
 namespace FuryPlusPlus {
     /**
-     * Read-only, per-avatar improvement projections for the welcome/settings window —
-     * dry runs of the quality passes' own detection logic against the UNBAKED scene
-     * avatar. Numbers are estimates: the baked result differs once VRCFury adds its own
-     * parameters and layers. Each estimator is exception-isolated; a failure reports -1.
+     * Read-only, per-avatar improvement projections for the welcome/settings window,
+     * computed by the passes' OWN eligibility classifiers (StripUnusedParamsPass.Classify,
+     * NarrowIntParamsPass.Classify) against the UNBAKED scene avatar — the projection
+     * cannot drift from what the passes actually do. Numbers are still estimates: the
+     * baked result differs once VRCFury adds its own parameters and layers. Each
+     * estimator is exception-isolated; a failure reports -1.
      */
     internal static class Estimators {
         internal struct Result {
@@ -38,30 +41,27 @@ namespace FuryPlusPlus {
                 if (paramsAsset != null && paramsAsset.parameters != null) {
                     result.SyncedBits = paramsAsset.CalcTotalCost();
                     if (index != null) {
+                        // The passes' own doctrines, with the user's current settings —
+                        // the strip runs first, so narrowing only sees the remainder.
+                        var keepDynamics = Settings.IsOptionEnabled(
+                            StripUnusedParamsModule.Instance, StripUnusedParamsModule.KeepDynamicsParams);
+                        var keepGlobs = StripUnusedParamsModule.CurrentKeepGlobs();
+
                         var strippable = paramsAsset.parameters
-                            .Where(parameter => parameter != null
-                                                && parameter.networkSynced
-                                                && !string.IsNullOrEmpty(parameter.name)
-                                                && !index.Reads.Contains(parameter.name))
+                            .Where(parameter => StripUnusedParamsPass.Classify(
+                                parameter, index, keepDynamics, keepGlobs)
+                                == StripUnusedParamsPass.KeepReason.None)
                             .ToList();
                         result.StrippableParams = strippable.Count;
                         result.StrippableBits = strippable
                             .Sum(parameter => VRCExpressionParameters.TypeCost(parameter.valueType));
 
+                        var strippedNames = new HashSet<string>(strippable.Select(p => p.name));
                         result.NarrowableInts = paramsAsset.parameters.Count(parameter =>
                             parameter != null
-                            && parameter.networkSynced
-                            && parameter.valueType == VRCExpressionParameters.ValueType.Int
-                            && !string.IsNullOrEmpty(parameter.name)
-                            && (parameter.defaultValue == 0 || parameter.defaultValue == 1)
-                            && index.Reads.Contains(parameter.name)
-                            && index.Details.TryGetValue(parameter.name, out var detail)
-                            && !detail.UsedAsPuppet
-                            && !detail.MenuValueOtherThanOne
-                            && !detail.HasUnsupportedCondition
-                            && !detail.DriverNonBinaryWrite
-                            && !detail.AapTarget
-                            && (detail.HasMenuControl || detail.HasDriverWrite));
+                            && !strippedNames.Contains(parameter.name)
+                            && NarrowIntParamsPass.Classify(parameter, index, keepGlobs)
+                                == NarrowIntParamsPass.Verdict.Eligible);
                     }
                 }
             } catch { }

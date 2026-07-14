@@ -39,23 +39,35 @@ namespace FuryPlusPlus {
      * Known deltas (documented): packed params send live values instead of latched ones,
      * and received values apply at their batch instead of at cycle end.
      */
-    internal sealed class CompressorSub8Module : Module {
-        internal static CompressorSub8Module Instance { get; private set; }
+    internal sealed class CompressorSub8Module : Module<CompressorSub8Module> {
+        /** Float params (wildcards) that opt in to 4-bit pair packing; empty = module inert. */
+        internal static readonly ModuleListOption PrecisionList = new ModuleListOption(
+            "precisionList", "Precision list (float params to 4-bit pack)",
+            "Semicolon-separated wildcard patterns of float parameters to pack in pairs at " +
+            "4-bit precision. 16 steps is visible on radials — list only params where that's " +
+            "acceptable.");
 
-        internal CompressorSub8Module() {
-            Instance = this;
-        }
+        private static readonly ModuleListOption[] AllListOptions = { PrecisionList };
 
         internal override string Id => "compressorSub8";
         internal override string DisplayName => "Compressor: 4-bit float pairs (opt-in list)";
         internal override ModuleKind Kind => ModuleKind.Quality;
         internal override CompatTier RequiredTier => CompatTier.ExactVersion;
+        internal override string SettingsGroup => "Parameter compressor (sync bits)";
         internal override string Description =>
             "Packs pairs of listed float parameters into one int sync lane at 4-bit precision " +
             "each (16 steps — visible on radials, so list only params where that's acceptable). " +
-            "Inert until the precision list is filled: " + CompressorScope.Sub8ListKey + " " +
-            "(semicolon-separated wildcards). Quest uploads of the same avatar need FuryPlusPlus " +
-            "with the same list.";
+            "Inert until the precision list below is filled. Quest uploads of the same avatar " +
+            "need FuryPlusPlus with the same list.";
+
+        internal override IReadOnlyList<ModuleListOption> ListOptions => AllListOptions;
+
+        internal override (string Text, string Tooltip)? ReportGain(Estimators.Result? analysis) {
+            return CompressorScope.ReportedSub8Pairs > 0
+                ? ($"{CompressorScope.ReportedSub8Pairs} float pairs → 4 bits last bake",
+                    CompressorScope.Sub8Stats)
+                : ((string, string)?)null;
+        }
 
         internal override void Install(Harmony harmony, VrcfuryCompat compat) {
             CompressorScope.EnsureInstalled(harmony);
@@ -304,11 +316,9 @@ namespace FuryPlusPlus {
             return layer.stateMachine;
         }
 
-        private static readonly Regex TrueParamName = new Regex(@"^VF_\d+_True$");
-
         private static string FindTrueParam(AnimatorController fxRaw) {
             var parameter = fxRaw.parameters.FirstOrDefault(p =>
-                TrueParamName.IsMatch(p.name) && p.defaultBool);
+                ToggleTreeCompat.AlwaysTrueParamName.IsMatch(p.name) && p.defaultBool);
             if (parameter == null) {
                 throw new Exception("FuryPlusPlus sub-8-bit packing: always-true parameter not found.");
             }
@@ -458,25 +468,27 @@ namespace FuryPlusPlus {
             return tree;
         }
 
-        private static void AddChild(BlendTree tree, Motion motion, float threshold, string directParam) {
-            var children = tree.children;
+        // tree.children round-trips the native array per assignment, so children are
+        // accumulated in a list and assigned exactly once per tree.
+        private static ChildMotion Child(Motion motion, float threshold, string directParam) {
             var child = new ChildMotion { motion = motion, timeScale = 1, threshold = threshold };
             if (directParam != null) child.directBlendParameter = directParam;
-            ArrayUtility.Add(ref children, child);
-            tree.children = children;
+            return child;
         }
 
         /** 32-child plateau step tree: quantizes source into contribution*index on the AAP. */
         private static BlendTree StepTree(string sourceParam, string aap, float contributionPerIndex) {
             var tree = NewTree($"FPP Sub8 quantize {sourceParam}", BlendTreeType.Simple1D, sourceParam);
             const float epsilon = 1e-4f;
+            var children = new List<ChildMotion>(32);
             for (var k = 0; k <= 15; k++) {
                 var clip = AapClip($"{aap} = {k}", (aap, k * contributionPerIndex));
                 var start = k == 0 ? -1f : Boundary(k);
                 var end = k == 15 ? 1f : Boundary(k + 1) - epsilon;
-                AddChild(tree, clip, start, null);
-                AddChild(tree, clip, end, null);
+                children.Add(Child(clip, start, null));
+                children.Add(Child(clip, end, null));
             }
+            tree.children = children.ToArray();
             return tree;
         }
 
@@ -493,11 +505,13 @@ namespace FuryPlusPlus {
 
         private static void BuildEncodeLayer(object fx, List<PairPlan> plans, string oneParam) {
             var root = (BlendTree)NewDbtLayer(fx, "FuryPlusPlus Sub8 Encode", -1);
+            var children = new List<ChildMotion>(plans.Count * 2);
             foreach (var plan in plans) {
                 // Two step trees summing into the packed AAP: hi*16 + lo.
-                AddChild(root, StepTree(plan.Rep.name, plan.PackedAap, 16f), 0, oneParam);
-                AddChild(root, StepTree(plan.Partner.name, plan.PackedAap, 1f), 0, oneParam);
+                children.Add(Child(StepTree(plan.Rep.name, plan.PackedAap, 16f), 0, oneParam));
+                children.Add(Child(StepTree(plan.Partner.name, plan.PackedAap, 1f), 0, oneParam));
             }
+            root.children = children.ToArray();
         }
 
         private static void BuildDecodeLayer(
@@ -514,19 +528,23 @@ namespace FuryPlusPlus {
             if (compressorIndex < 0) compressorIndex = fxRaw.layers.Length;
 
             var root = (BlendTree)NewDbtLayer(fx, "FuryPlusPlus Sub8 Decode", compressorIndex);
+            var rootChildren = new List<ChildMotion>(plans.Count);
             foreach (var plan in plans) {
                 var decode = NewTree($"FPP Sub8 decode {plan.SlotParamName}",
                     BlendTreeType.Simple1D, plan.SlotParamName);
+                var decodeChildren = new List<ChildMotion>(256);
                 for (var value = 0; value <= 255; value++) {
                     var clip = AapClip(
                         $"decode {value}",
                         (plan.HiOutAap, DecodeValue(value >> 4)),
                         (plan.LoOutAap, DecodeValue(value & 15))
                     );
-                    AddChild(decode, clip, value, null);
+                    decodeChildren.Add(Child(clip, value, null));
                 }
-                AddChild(root, decode, 0, oneParam);
+                decode.children = decodeChildren.ToArray();
+                rootChildren.Add(Child(decode, 0, oneParam));
             }
+            root.children = rootChildren.ToArray();
         }
     }
 }

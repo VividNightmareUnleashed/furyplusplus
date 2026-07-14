@@ -19,9 +19,7 @@ namespace FuryPlusPlus {
      * Fails closed only if Create/Progress themselves no longer resolve; any styling
      * exception falls open to the stock look.
      */
-    internal sealed class ProgressWindowThemeModule : Module {
-        internal static ProgressWindowThemeModule Instance { get; private set; }
-
+    internal sealed class ProgressWindowThemeModule : Module<ProgressWindowThemeModule> {
         internal static readonly ModuleOption LiveTimings = new ModuleOption(
             "liveTimings", "Show live phase timings", true,
             "Appends the currently-running VRCFury phase and its elapsed time to the badge.");
@@ -31,20 +29,18 @@ namespace FuryPlusPlus {
             "Animates the progress bar fill as supercharged liquid (waves, twinkling sparkles, " +
             "glowing leading edge). Off = flat accent color.");
 
-        internal ProgressWindowThemeModule() {
-            Instance = this;
-        }
+        private static readonly ModuleOption[] AllOptions = { LiquidBar, LiveTimings };
 
         internal override string Id => "progressWindowTheme";
         internal override string DisplayName => "Progress window theme";
         internal override ModuleKind Kind => ModuleKind.Cosmetic;
         internal override CompatTier RequiredTier => CompatTier.Profiling;
+        internal override string SettingsGroup => "Editor visuals";
         internal override string Description =>
             "Themes VRCFury's build progress window and surfaces FuryPlusPlus status " +
             "(including a warning when optimizations are disabled by a version mismatch).";
 
-        internal override System.Collections.Generic.IReadOnlyList<ModuleOption> Options =>
-            new[] { LiquidBar, LiveTimings };
+        internal override System.Collections.Generic.IReadOnlyList<ModuleOption> Options => AllOptions;
 
         internal override void Install(Harmony harmony, VrcfuryCompat compat) {
             ProgressWindowThemePatch.Install(harmony, compat);
@@ -63,6 +59,12 @@ namespace FuryPlusPlus {
             new ConditionalWeakTable<EditorWindow, LiquidFillElement>();
 
         private static bool brokenThisSession;
+
+        // Snapshotted at CreatePostfix (once per bake, a phase boundary): ProgressPostfix
+        // fires for every VRCFury phase INSIDE the bake being timed, and neither value can
+        // change mid-bake — recounting 40+ modules against EditorPrefs there is pure waste.
+        private static int activeCountSnapshot;
+        private static bool liveTimingsSnapshot;
 
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
             var windowType = ReflectionUtils.Demand(
@@ -97,11 +99,13 @@ namespace FuryPlusPlus {
         private static void CreatePostfix(object __result) {
             if (brokenThisSession) return;
             var module = ProgressWindowThemeModule.Instance;
-            if (module == null || !ModuleRegistry.IsActive(module) || !module.Enabled) {
+            if (!ModuleRegistry.IsOn(module)) {
                 // Master switch off is exactly a state worth showing — but with the module
                 // itself killed, honor the kill switch and leave the window stock.
                 if (Settings.MasterEnabled) return;
             }
+            liveTimingsSnapshot = module != null
+                                  && Settings.IsOptionEnabled(module, ProgressWindowThemeModule.LiveTimings);
 
             try {
                 if (!(__result is EditorWindow window)) return;
@@ -122,8 +126,8 @@ namespace FuryPlusPlus {
                            $"{VrcfuryCompat.PinnedVersion}. Optimizations disabled (profiling only).";
                     warn = true;
                 } else {
-                    var active = ModuleRegistry.All.Count(m => ModuleRegistry.IsActive(m) && m.Enabled);
-                    text = $"FuryPlusPlus — {active} modules active";
+                    activeCountSnapshot = ModuleRegistry.All.Count(ModuleRegistry.IsOn);
+                    text = $"FuryPlusPlus — {activeCountSnapshot} modules active";
                     warn = false;
                 }
 
@@ -192,12 +196,9 @@ namespace FuryPlusPlus {
                 if (Liquids.TryGetValue(window, out var liquid)) liquid.MarkDirtyRepaint();
                 if (!Badges.TryGetValue(window, out var badge)) return;
 
-                var module = ProgressWindowThemeModule.Instance;
-                if (module == null || !Settings.IsOptionEnabled(module, ProgressWindowThemeModule.LiveTimings)) {
-                    return;
-                }
+                if (!liveTimingsSnapshot) return;
                 var current = ProfilePatches.CurrentAction();
-                var active = ModuleRegistry.All.Count(m => ModuleRegistry.IsActive(m) && m.Enabled);
+                var active = activeCountSnapshot;
                 badge.text = current == null
                     ? $"FuryPlusPlus — {active} modules active"
                     : $"FuryPlusPlus — {active} modules active  •  {current.Value.Key} {current.Value.ElapsedMs:F0} ms";

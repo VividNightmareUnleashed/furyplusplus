@@ -10,16 +10,12 @@ namespace FuryPlusPlus {
      * per-phase index. Entries retain live Transform references so hierarchy moves keep
      * parent/child queries correct, and destroyed constraints are filtered at lookup time.
      */
-    internal sealed class ArmatureConstraintIndexModule : Module {
-        internal static ArmatureConstraintIndexModule Instance { get; private set; }
-
-        internal ArmatureConstraintIndexModule() {
-            Instance = this;
-        }
+    internal sealed class ArmatureConstraintIndexModule : Module<ArmatureConstraintIndexModule> {
 
         internal override string Id => "armatureConstraintIndex";
         internal override string DisplayName => "Armature constraint index";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Armature & links";
         internal override string Description =>
             "One per-phase constraint index instead of thousands of whole-avatar constraint scans.";
 

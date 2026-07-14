@@ -11,16 +11,12 @@ namespace FuryPlusPlus {
      * of times; this records the exact transforms at each call and commits each skin once
      * immediately before deferred hierarchy moves are applied.
      */
-    internal sealed class ArmatureSkinIndexModule : Module {
-        internal static ArmatureSkinIndexModule Instance { get; private set; }
-
-        internal ArmatureSkinIndexModule() {
-            Instance = this;
-        }
+    internal sealed class ArmatureSkinIndexModule : Module<ArmatureSkinIndexModule> {
 
         internal override string Id => "armatureSkinIndex";
         internal override string DisplayName => "Batched armature skin rewrite";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Armature & links";
         internal override string Description =>
             "Commits Armature Link's bone and bindpose rewrites once per skin instead of once per bone.";
 

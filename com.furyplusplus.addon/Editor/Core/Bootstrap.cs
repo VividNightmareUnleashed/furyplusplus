@@ -123,6 +123,10 @@ namespace FuryPlusPlus {
             } catch (Exception e) {
                 Log.Warn("Failed to remove old patches: " + e.Message);
             }
+            // Shared patch scopes latch their installed state; a mid-session re-init
+            // (master switch off→on) must make them re-patch, not skip.
+            BakeChainAnchor.NotifyUnpatched();
+            CompressorScope.NotifyUnpatched();
         }
     }
 }

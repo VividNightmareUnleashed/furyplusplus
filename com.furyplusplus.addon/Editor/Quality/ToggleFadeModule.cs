@@ -19,16 +19,12 @@ namespace FuryPlusPlus {
      *    (mitigated: toggles sharing bindings with any other layer are skipped);
      *  - only symmetric fades convert (in-time == out-time); asymmetric ones are skipped.
      */
-    internal sealed class ToggleFadeModule : Module {
-        internal static ToggleFadeModule Instance { get; private set; }
-
-        internal ToggleFadeModule() {
-            Instance = this;
-        }
+    internal sealed class ToggleFadeModule : Module<ToggleFadeModule> {
 
         internal override string Id => "toggleFadeTrees";
         internal override string DisplayName => "Fade toggles → smoothed blendtree";
         internal override ModuleKind Kind => ModuleKind.Quality;
+        internal override string SettingsGroup => "Animator layers";
         internal override CompatTier RequiredTier => CompatTier.ExactVersion;
         internal override bool DefaultEnabled => false;
         internal override string Description =>
@@ -47,12 +43,17 @@ namespace FuryPlusPlus {
         internal override string ReportStats() {
             return ToggleFadePass.LastStats;
         }
+
+        internal override (string Text, string Tooltip)? ReportGain(Estimators.Result? analysis) {
+            return ToggleFadePass.LastConverted > 0
+                ? ($"{ToggleFadePass.LastConverted} fade toggles converted last bake", ToggleFadePass.LastStats)
+                : ((string, string)?)null;
+        }
     }
 
     internal static class ToggleFadePass {
         internal static string LastStats;
-
-        private static readonly Regex AlwaysTrueParam = new Regex(@"^VF_\d+_True$");
+        internal static int LastConverted;
 
         private sealed class Match {
             internal ToggleConversionRuntime.Entry Entry;
@@ -96,6 +97,7 @@ namespace FuryPlusPlus {
                 }
                 if (converted.Count > 0 || skippedAsymmetric > 0) {
                     LastStats = $"converted={converted.Count}, skippedAsymmetric={skippedAsymmetric}";
+                    LastConverted = converted.Count;
                 }
             } catch (System.Exception e) {
                 Log.Warn("Fade toggle conversion skipped: " + e.Message);
@@ -199,7 +201,7 @@ namespace FuryPlusPlus {
             if (conditions.Length != 1) return false;
             var condition = conditions[0];
             if (condition.mode != AnimatorConditionMode.If) return false;
-            if (!AlwaysTrueParam.IsMatch(condition.parameter)) return false;
+            if (!ToggleTreeCompat.AlwaysTrueParamName.IsMatch(condition.parameter)) return false;
             var parameter = ToggleConversionRuntime.FindParam(snapshot, condition.parameter);
             return parameter != null
                    && parameter.type == AnimatorControllerParameterType.Bool

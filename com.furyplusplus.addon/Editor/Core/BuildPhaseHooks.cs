@@ -31,7 +31,6 @@ namespace FuryPlusPlus {
         private static Type featureOrderType;
         private static MethodInfo actionGetPriorty;
         private static MethodInfo actionGetService;
-        private static FieldInfo vfGameObjectField;
         private static MethodInfo getInjector;
         private static MethodInfo injectorGetService;
         private static Type injectorContextType;
@@ -87,12 +86,7 @@ namespace FuryPlusPlus {
             );
             actionGetService = compat.ActionGetService;
 
-            var vfGameObjectType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Utils.VFGameObject"), "VF.Utils.VFGameObject");
-            vfGameObjectField = ReflectionUtils.Demand(
-                vfGameObjectType.GetField("_gameObject",
-                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public),
-                "VFGameObject._gameObject");
+            VfGameObjectCompat.DemandCore();
             var injectorBuilderType = ReflectionUtils.Demand(
                 ReflectionUtils.FindType("VF.Builder.VRCFuryInjectorBuilder"),
                 "VF.Builder.VRCFuryInjectorBuilder");
@@ -160,7 +154,7 @@ namespace FuryPlusPlus {
                 hook.Broken = false;
             }
             try {
-                currentAvatarRoot = vfGameObjectField.GetValue(__0) as UnityEngine.GameObject;
+                currentAvatarRoot = VfGameObjectCompat.Unwrap(__0);
             } catch {
                 currentAvatarRoot = null;
             }
@@ -170,20 +164,37 @@ namespace FuryPlusPlus {
         private static void CallPrefix(object __instance) {
             if (!runActive || Hooks.Count == 0) return;
 
+            // The ~7 hooks each fire at most once per build; skip the reflection invokes
+            // for every action after the last one has fired.
+            var anyPending = false;
+            foreach (var hook in Hooks) {
+                if (!hook.Fired && !hook.Broken) { anyPending = true; break; }
+            }
+            if (!anyPending) return;
+
             int priority;
-            object service;
             try {
                 priority = Convert.ToInt32(actionGetPriorty.Invoke(__instance, null));
-                service = actionGetService.Invoke(__instance, null);
             } catch {
                 // Never break the build over dispatch bookkeeping.
                 return;
             }
 
+            // The service is only needed when a hook actually crosses its boundary here.
+            object service = null;
+            var serviceFetched = false;
             foreach (var hook in Hooks) {
                 if (hook.Fired || hook.Broken) continue;
                 var atBoundary = hook.After ? priority > hook.Threshold : priority >= hook.Threshold;
                 if (!atBoundary) continue;
+                if (!serviceFetched) {
+                    try {
+                        service = actionGetService.Invoke(__instance, null);
+                    } catch {
+                        return;
+                    }
+                    serviceFetched = true;
+                }
                 hook.Fired = true;
                 Fire(hook, service);
             }

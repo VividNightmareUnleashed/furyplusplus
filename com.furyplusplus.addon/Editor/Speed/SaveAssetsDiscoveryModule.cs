@@ -16,9 +16,7 @@ namespace FuryPlusPlus {
      * objects. Controller-only subassets are deliberately left to their controller root;
      * remaining standalone generated assets are saved directly.
      */
-    internal sealed class SaveAssetsDiscoveryModule : Module {
-        internal static SaveAssetsDiscoveryModule Instance { get; private set; }
-
+    internal sealed class SaveAssetsDiscoveryModule : Module<SaveAssetsDiscoveryModule> {
         internal static readonly ModuleOption SkipTransformScanOption = new ModuleOption(
             "skipTransformScan",
             "Skip inert Transform scans (experimental)",
@@ -35,13 +33,10 @@ namespace FuryPlusPlus {
             SkipDuplicateRendererScanOption
         };
 
-        internal SaveAssetsDiscoveryModule() {
-            Instance = this;
-        }
-
         internal override string Id => "saveAssetsDiscovery";
         internal override string DisplayName => "Fast SaveAssets discovery";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Asset saving";
         internal override string Description =>
             "Replaces the final every-Component asset scan with a pass over VRCFury's created-object registry.";
         internal override IReadOnlyList<ModuleOption> Options => AllOptions;

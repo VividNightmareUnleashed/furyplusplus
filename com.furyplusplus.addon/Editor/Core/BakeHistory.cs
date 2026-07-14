@@ -45,6 +45,9 @@ namespace FuryPlusPlus {
         private static bool baselineLoaded;
         private static string baselineFileOverride;
 
+        /** Bumped on every recorded bake so UI caches can key on it instead of re-parsing. */
+        internal static int Version { get; private set; }
+
         /** Test hook: redirects the baseline file and drops the cache. */
         internal static string BaselineFileOverride {
             get { return baselineFileOverride; }
@@ -52,16 +55,26 @@ namespace FuryPlusPlus {
                 baselineFileOverride = value;
                 baselineCache = null;
                 baselineLoaded = false;
+                Version++;
             }
         }
+
+        // Cached like Settings.MasterEnabled: this getter sits inside every Enabled check.
+        private static bool? benchmarkCache;
 
         /**
          * Arms one benchmark bake: Settings.IsModuleEnabled reports every module except the
          * profiler as disabled until ProfilePatches clears the flag at that bake's end.
          */
         internal static bool BenchmarkPending {
-            get { return EditorPrefs.GetBool(BenchmarkKey, false); }
-            set { EditorPrefs.SetBool(BenchmarkKey, value); }
+            get {
+                benchmarkCache = benchmarkCache ?? EditorPrefs.GetBool(BenchmarkKey, false);
+                return benchmarkCache.Value;
+            }
+            set {
+                benchmarkCache = value;
+                EditorPrefs.SetBool(BenchmarkKey, value);
+            }
         }
 
         internal static Record? LastBake => ReadPrefs(LastKey);
@@ -90,6 +103,7 @@ namespace FuryPlusPlus {
 
         internal static void RecordBake(
             double totalMs, string avatar, IReadOnlyList<(string Name, double Ms)> phases, bool stock) {
+            Version++;
             if (stock) {
                 // The baseline must not clobber the last normal bake it gets compared with.
                 baselineCache = new BaselineFile {

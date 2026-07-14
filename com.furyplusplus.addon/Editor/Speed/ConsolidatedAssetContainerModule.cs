@@ -12,16 +12,12 @@ namespace FuryPlusPlus {
      * files than attaching subassets. Keep controllers as main .controller assets and
      * consolidate all other roots into one generated container per SaveAssets pass.
      */
-    internal sealed class ConsolidatedAssetContainerModule : Module {
-        internal static ConsolidatedAssetContainerModule Instance { get; private set; }
-
-        internal ConsolidatedAssetContainerModule() {
-            Instance = this;
-        }
+    internal sealed class ConsolidatedAssetContainerModule : Module<ConsolidatedAssetContainerModule> {
 
         internal override string Id => "consolidatedAssetContainer";
         internal override string DisplayName => "Consolidated asset container";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Asset saving";
         internal override string Description =>
             "Attaches generated non-controller assets to one container file instead of importing a separate file per root.";
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using HarmonyLib;
 
 namespace FuryPlusPlus {
@@ -36,11 +37,24 @@ namespace FuryPlusPlus {
 
         internal virtual IReadOnlyList<ModuleOption> Options => Array.Empty<ModuleOption>();
 
+        /** Semicolon-separated wildcard-list settings; always bake-output-affecting. */
+        internal virtual IReadOnlyList<ModuleListOption> ListOptions => Array.Empty<ModuleListOption>();
+
+        /** Settings-window group title within this module's kind tab; null lands in "Other". */
+        internal virtual string SettingsGroup => null;
+
         /**
          * Runtime kill switch (master switch + per-module pref). Patches read this at phase
          * boundaries (Begin-style prefixes), never per hot inner call.
          */
         internal bool Enabled => Settings.IsModuleEnabled(this);
+
+        /** Installed for this domain load AND currently switched on. */
+        internal bool IsActiveAndEnabled => ModuleRegistry.IsActive(this) && Enabled;
+
+        // Id is immutable and Enabled runs at every phase boundary — never rebuild the key.
+        private string prefKey;
+        internal string PrefKey => prefKey ?? (prefKey = Settings.KeyPrefix + "module." + Id);
 
         /**
          * Fail-closed: throw (MissingMemberException or similar) on ANY unresolved reflection
@@ -50,5 +64,30 @@ namespace FuryPlusPlus {
 
         /** One-line stats for the profiler report footer; null = nothing to report. */
         internal virtual string ReportStats() => null;
+
+        /**
+         * Green gain chip for this module's settings row: a real measured or projected
+         * number (the same typed counters ReportStats formats), never an invented estimate.
+         * Null = no chip. `analysis` is the window's last per-avatar projection, if any.
+         */
+        internal virtual (string Text, string Tooltip)? ReportGain(Estimators.Result? analysis) => null;
+
+        /** Module-specific extra controls rendered under the settings row while installed. */
+        internal virtual void DrawExtraSettings() { }
+
+        protected static string N(int value) => value.ToString("N0", CultureInfo.InvariantCulture);
+    }
+
+    /**
+     * Module with a registry-constructed singleton. Patch classes reach their module via
+     * TSelf.Instance instead of every module hand-rolling the property (where a forgotten
+     * assignment silently disables the module).
+     */
+    internal abstract class Module<TSelf> : Module where TSelf : Module<TSelf> {
+        internal static TSelf Instance { get; private set; }
+
+        protected Module() {
+            Instance = (TSelf)this;
+        }
     }
 }

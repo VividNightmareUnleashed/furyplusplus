@@ -16,8 +16,6 @@ namespace FuryPlusPlus {
      */
     internal sealed class ParamUsageIndex {
         internal readonly HashSet<string> Reads = new HashSet<string>();
-        internal readonly HashSet<string> DriverWrites = new HashSet<string>();
-        internal readonly HashSet<string> MenuWrites = new HashSet<string>();
         internal readonly HashSet<string> DynamicsParams = new HashSet<string>();
 
         /** Closed-world detail per parameter, for the Int→Bool narrowing eligibility check. */
@@ -133,7 +131,6 @@ namespace FuryPlusPlus {
                     AddRead(parameter.source);
                 }
                 if (string.IsNullOrEmpty(parameter.name)) continue;
-                DriverWrites.Add(parameter.name);
                 var detail = DetailOf(parameter.name);
                 detail.HasDriverWrite = true;
                 switch (parameter.type) {
@@ -180,7 +177,6 @@ namespace FuryPlusPlus {
                                || control.type == VRCExpressionsMenu.Control.ControlType.FourAxisPuppet;
                 var mainParam = control.parameter?.name;
                 if (!string.IsNullOrEmpty(mainParam)) {
-                    MenuWrites.Add(mainParam);
                     var detail = DetailOf(mainParam);
                     detail.HasMenuControl = true;
                     if (isPuppet) {
@@ -192,7 +188,6 @@ namespace FuryPlusPlus {
                 if (control.subParameters != null) {
                     foreach (var sub in control.subParameters) {
                         if (string.IsNullOrEmpty(sub?.name)) continue;
-                        MenuWrites.Add(sub.name);
                         var detail = DetailOf(sub.name);
                         detail.HasMenuControl = true;
                         detail.UsedAsPuppet = true;
@@ -212,18 +207,23 @@ namespace FuryPlusPlus {
         private void CollectDynamics(GameObject avatarRoot) {
             var physBoneType = ReflectionUtils.FindType("VRC.SDK3.Dynamics.PhysBone.Components.VRCPhysBone");
             var contactType = ReflectionUtils.FindType("VRC.SDK3.Dynamics.Contact.Components.VRCContactReceiver");
+            // Member lookups hoisted out of the per-component loop (dynamics-heavy avatars
+            // carry hundreds of PhysBones/Contacts).
+            var physBoneParameter = physBoneType?.GetField("parameter");
+            var contactParameterProperty = contactType?.GetProperty("parameter");
+            var contactParameterField = contactType?.GetField("parameter");
 
             foreach (var component in avatarRoot.GetComponentsInChildren<Component>(true)) {
                 if (component == null) continue;
                 var type = component.GetType();
                 if (physBoneType != null && physBoneType.IsAssignableFrom(type)) {
-                    var parameter = physBoneType.GetField("parameter")?.GetValue(component) as string;
+                    var parameter = physBoneParameter?.GetValue(component) as string;
                     if (!string.IsNullOrEmpty(parameter)) {
                         foreach (var suffix in PhysBoneSuffixes) DynamicsParams.Add(parameter + suffix);
                     }
                 } else if (contactType != null && contactType.IsAssignableFrom(type)) {
-                    var parameter = contactType.GetProperty("parameter")?.GetValue(component) as string
-                                    ?? contactType.GetField("parameter")?.GetValue(component) as string;
+                    var parameter = contactParameterProperty?.GetValue(component) as string
+                                    ?? contactParameterField?.GetValue(component) as string;
                     if (!string.IsNullOrEmpty(parameter)) DynamicsParams.Add(parameter);
                 }
             }

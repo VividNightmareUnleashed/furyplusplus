@@ -1,10 +1,8 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 using HarmonyLib;
 using UnityEditor;
-using UnityEngine;
 using VRC.SDK3.Avatars.Components;
 using VRC.SDK3.Avatars.ScriptableObjects;
 
@@ -26,21 +24,16 @@ namespace FuryPlusPlus {
      * Runs after the unused-param strip in the post-build hook; PC↔Quest agreement is
      * enforced by the sidecar (mobile builds hard-fail on divergence).
      */
-    internal sealed class NarrowIntParamsModule : Module {
-        internal static NarrowIntParamsModule Instance { get; private set; }
-
-        internal NarrowIntParamsModule() {
-            Instance = this;
-        }
-
+    internal sealed class NarrowIntParamsModule : Module<NarrowIntParamsModule> {
         internal override string Id => "narrowIntParams";
         internal override string DisplayName => "Narrow 0/1 Int parameters to Bool";
         internal override ModuleKind Kind => ModuleKind.Pass;
         internal override CompatTier RequiredTier => CompatTier.ExactVersion;
+        internal override string SettingsGroup => "Synced parameters";
         internal override string Description =>
             "Synced Ints that only ever hold 0/1 become Bools (7 bits saved each). " +
             "Only the expression parameter changes; VRChat casts it into the animator. " +
-            "Shares the keep-list: " + StripUnusedParamsModule.KeepListKey;
+            "Shares the keep-list of \"Strip unused synced parameters\".";
 
         internal override void Install(Harmony harmony, VrcfuryCompat compat) {
             // Shares StripUnusedParamsPass's resolved surface; validate it resolves.
@@ -50,10 +43,63 @@ namespace FuryPlusPlus {
         internal override string ReportStats() {
             return NarrowIntParamsPass.LastStats;
         }
+
+        internal override (string Text, string Tooltip)? ReportGain(Estimators.Result? analysis) {
+            if (analysis?.NarrowableInts > 0) {
+                return ($"-{analysis.Value.NarrowableInts * 7} sync bits",
+                    $"{analysis.Value.NarrowableInts} 0/1 Int parameter(s) narrowable to Bool (7 bits each).");
+            }
+            return NarrowIntParamsPass.LastBits > 0
+                ? ($"-{NarrowIntParamsPass.LastBits} sync bits last bake", NarrowIntParamsPass.LastStats)
+                : ((string, string)?)null;
+        }
     }
 
     internal static class NarrowIntParamsPass {
         internal static string LastStats;
+        internal static int LastBits;
+
+        internal enum Verdict {
+            Eligible,
+            Ineligible,
+            /** Reads exist but no menu/driver writes — possibly OSC-driven typed input. */
+            OscSuspect
+        }
+
+        /**
+         * The one narrowing doctrine — Run applies it to the built avatar and
+         * Estimators.Analyze projects it onto the unbaked one, so the settings-window
+         * numbers can never drift from what the pass actually does.
+         */
+        internal static Verdict Classify(
+            VRCExpressionParameters.Parameter parameter,
+            ParamUsageIndex index,
+            List<Regex> keepGlobs
+        ) {
+            if (parameter == null || !parameter.networkSynced) return Verdict.Ineligible;
+            if (parameter.valueType != VRCExpressionParameters.ValueType.Int) return Verdict.Ineligible;
+            if (string.IsNullOrEmpty(parameter.name)) return Verdict.Ineligible;
+            if (parameter.defaultValue != 0 && parameter.defaultValue != 1) return Verdict.Ineligible;
+            if (keepGlobs.Any(glob => glob.IsMatch(parameter.name))) return Verdict.Ineligible;
+
+            index.Details.TryGetValue(parameter.name, out var detail);
+            var isRead = index.Reads.Contains(parameter.name);
+            var hasMenu = detail?.HasMenuControl == true;
+            var hasDriverWrite = detail?.HasDriverWrite == true;
+
+            if (isRead && !hasMenu && !hasDriverWrite) {
+                // Narrowing would change the wire type an external OSC app may rely on.
+                return Verdict.OscSuspect;
+            }
+            if (detail != null) {
+                if (detail.UsedAsPuppet) return Verdict.Ineligible;
+                if (detail.MenuValueOtherThanOne) return Verdict.Ineligible;
+                if (detail.HasUnsupportedCondition) return Verdict.Ineligible;
+                if (detail.DriverNonBinaryWrite) return Verdict.Ineligible;
+                if (detail.AapTarget) return Verdict.Ineligible;
+            }
+            return Verdict.Eligible;
+        }
 
         internal static List<string> Run(VRCAvatarDescriptor descriptor, ParamUsageIndex index) {
             var paramsAsset = descriptor.expressionParameters;
@@ -61,32 +107,15 @@ namespace FuryPlusPlus {
             var oscSuspects = new List<string>();
             if (paramsAsset == null || paramsAsset.parameters == null) return narrowed;
 
-            var keepGlobs = ParseKeepList(
-                EditorPrefs.GetString(StripUnusedParamsModule.KeepListKey, ""));
+            var keepGlobs = StripUnusedParamsModule.CurrentKeepGlobs();
 
             foreach (var parameter in paramsAsset.parameters) {
-                if (parameter == null || !parameter.networkSynced) continue;
-                if (parameter.valueType != VRCExpressionParameters.ValueType.Int) continue;
-                if (string.IsNullOrEmpty(parameter.name)) continue;
-                if (parameter.defaultValue != 0 && parameter.defaultValue != 1) continue;
-                if (keepGlobs.Any(glob => glob.IsMatch(parameter.name))) continue;
-
-                index.Details.TryGetValue(parameter.name, out var detail);
-                var isRead = index.Reads.Contains(parameter.name);
-                var hasMenu = detail?.HasMenuControl == true;
-                var hasDriverWrite = detail?.HasDriverWrite == true;
-
-                if (isRead && !hasMenu && !hasDriverWrite) {
-                    // Possibly OSC-driven typed input — narrowing would change the wire type.
-                    oscSuspects.Add(parameter.name);
-                    continue;
-                }
-                if (detail != null) {
-                    if (detail.UsedAsPuppet) continue;
-                    if (detail.MenuValueOtherThanOne) continue;
-                    if (detail.HasUnsupportedCondition) continue;
-                    if (detail.DriverNonBinaryWrite) continue;
-                    if (detail.AapTarget) continue;
+                switch (Classify(parameter, index, keepGlobs)) {
+                    case Verdict.OscSuspect:
+                        oscSuspects.Add(parameter.name);
+                        continue;
+                    case Verdict.Ineligible:
+                        continue;
                 }
 
                 parameter.valueType = VRCExpressionParameters.ValueType.Bool;
@@ -104,19 +133,9 @@ namespace FuryPlusPlus {
                          "writes): " + string.Join(", ", oscSuspects) +
                          " — add to the keep-list to silence this.");
             }
+            LastBits = narrowed.Count * 7;
             LastStats = narrowed.Count == 0 ? null : $"narrowed={narrowed.Count} bits={narrowed.Count * 7}";
             return narrowed;
-        }
-
-        private static List<Regex> ParseKeepList(string raw) {
-            var globs = new List<Regex>();
-            foreach (var entry in raw.Split(';')) {
-                var trimmed = entry.Trim();
-                if (trimmed.Length == 0) continue;
-                var pattern = "^" + Regex.Escape(trimmed).Replace(@"\*", ".*").Replace(@"\?", ".") + "$";
-                globs.Add(new Regex(pattern, RegexOptions.CultureInvariant));
-            }
-            return globs;
         }
     }
 }

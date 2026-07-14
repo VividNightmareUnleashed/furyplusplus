@@ -11,16 +11,12 @@ namespace FuryPlusPlus {
      * method searches the complete hierarchy for the same set on every wrapper creation
      * and every move.
      */
-    internal sealed class ArmaturePhysboneIndexModule : Module {
-        internal static ArmaturePhysboneIndexModule Instance { get; private set; }
-
-        internal ArmaturePhysboneIndexModule() {
-            Instance = this;
-        }
+    internal sealed class ArmaturePhysboneIndexModule : Module<ArmaturePhysboneIndexModule> {
 
         internal override string Id => "armaturePhysboneIndex";
         internal override string DisplayName => "Armature PhysBone index";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Armature & links";
         internal override string Description =>
             "Snapshots the avatar's PhysBones once per phase instead of re-scanning the hierarchy per move.";
 

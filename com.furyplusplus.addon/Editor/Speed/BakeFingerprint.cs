@@ -70,7 +70,8 @@ namespace FuryPlusPlus {
             var compat = Bootstrap.Compat;
             config.Append("vrcfury:").Append(compat?.PackageVersion).Append(':')
                 .Append(compat?.ModuleVersionId).Append('\n');
-            config.Append("modules:").Append(ModuleRegistry.DescribeStates()).Append('\n');
+            // Output-relevant config only: cosmetic/pure-speed toggles must not churn the cache.
+            config.Append("modules:").Append(ModuleRegistry.DescribeOutputConfig()).Append('\n');
             // NDMF plugins (Modular Avatar etc.) register through NDMF, not as SDK preprocess
             // callbacks, so the "pre:" list below misses their version changes entirely.
             config.Append("ndmf:").Append(PreprocessChainCompat.DescribeNdmfPlugins()).Append('\n');
@@ -154,7 +155,7 @@ namespace FuryPlusPlus {
                 } else {
                     var path = AssetDatabase.GetAssetPath(obj);
                     if (!string.IsNullOrEmpty(path)) {
-                        if (path.Contains("/__Generated/") || path.StartsWith("Packages/com.vrcfury.temp")) {
+                        if (IsTransientPath(path)) {
                             // Upstream-generated container (NDMF/MA output, VRCFury temp):
                             // sub-asset localIds are random per regeneration, so the
                             // reference is identified by filename only — but the file's
@@ -208,7 +209,7 @@ namespace FuryPlusPlus {
                         var guid = match.Groups[2].Value;
                         var path = AssetDatabase.GUIDToAssetPath(guid);
                         if (string.IsNullOrEmpty(path)) return match.Value;
-                        if (path.Contains("/__Generated/") || path.StartsWith("Packages/com.vrcfury.temp")) {
+                        if (IsTransientPath(path)) {
                             result.UpstreamGenerated = true;
                             generatedAssetPaths.Add(path);
                             return "generated:" + Path.GetFileName(path);
@@ -231,6 +232,21 @@ namespace FuryPlusPlus {
             }
             parts.Reverse();
             return string.Join("/", parts);
+        }
+
+        /**
+         * Per-bake regenerated container (VRCFury temp package, NDMF/MA __Generated output).
+         * The ONE definition of "transient": the fingerprint (reference stabilization) and
+         * the snapshot store (clone/verify classification) must agree on it for replays to
+         * stay faithful.
+         */
+        internal static bool IsTransientPath(string path) {
+            return path.StartsWith("Packages/com.vrcfury.temp") || path.Contains("/__Generated/");
+        }
+
+        /** Cache identity of an avatar: play-mode initiators append "(Clone)" to the root. */
+        internal static string NormalizeAvatarName(string name) {
+            return name.Replace("(Clone)", "").Trim();
         }
 
         internal static string Sha(string input) {

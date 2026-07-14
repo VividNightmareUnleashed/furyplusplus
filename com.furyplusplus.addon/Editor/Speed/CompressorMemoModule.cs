@@ -21,16 +21,12 @@ namespace FuryPlusPlus {
      *     PC↔Quest platform alignment.
      * Pure memoization: sits below any solver, produces identical decisions.
      */
-    internal sealed class CompressorMemoModule : Module {
-        internal static CompressorMemoModule Instance { get; private set; }
-
-        internal CompressorMemoModule() {
-            Instance = this;
-        }
+    internal sealed class CompressorMemoModule : Module<CompressorMemoModule> {
 
         internal override string Id => "compressorMemo";
         internal override string DisplayName => "Parameter compressor memoization";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Controllers & animation";
         internal override string Description =>
             "Caches the compressor's repeated menu walks and parameter-name scans within one solve.";
 
@@ -121,8 +117,9 @@ namespace FuryPlusPlus {
                 ReflectionUtils.FindUniqueMethod(controllersServiceType, "GetAllReadOnlyControllers",
                     method => method.GetParameters().Length == 0),
                 "ControllersService.GetAllReadOnlyControllers()");
+            ClipCurveCompat.EnsureResolved();
             vfControllerCtrlField = ReflectionUtils.Demand(
-                vfControllerType.GetField("ctrl", any), "VFController.ctrl");
+                ClipCurveCompat.ControllerCtrlField, "VFController.ctrl");
 
             harmony.Patch(
                 apply,

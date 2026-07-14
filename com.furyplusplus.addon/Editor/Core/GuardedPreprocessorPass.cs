@@ -21,9 +21,7 @@ namespace FuryPlusPlus {
             try {
                 if (!Settings.MasterEnabled) return true;
                 var module = GatingModule;
-                if (module != null && (!ModuleRegistry.IsActive(module) || !module.Enabled)) {
-                    return true;
-                }
+                if (module != null && !ModuleRegistry.IsOn(module)) return true;
                 return Run(avatarObject);
             } catch (Exception e) {
                 Log.Error(GetType().Name + " failed and was skipped: " + e);

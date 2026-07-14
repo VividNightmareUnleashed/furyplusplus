@@ -13,16 +13,12 @@ namespace FuryPlusPlus {
      * FuryPlusPlus (with this module in the same state) is installed for both uploads —
      * that requirement is enforced by the FppSidecar and documented in the README.
      */
-    internal sealed class CompressorLanePackingModule : Module {
-        internal static CompressorLanePackingModule Instance { get; private set; }
-
-        internal CompressorLanePackingModule() {
-            Instance = this;
-        }
+    internal sealed class CompressorLanePackingModule : Module<CompressorLanePackingModule> {
 
         internal override string Id => "compressorLanePacking";
         internal override string DisplayName => "Compressor: pack bools into idle int lanes";
         internal override ModuleKind Kind => ModuleKind.Quality;
+        internal override string SettingsGroup => "Parameter compressor (sync bits)";
         internal override CompatTier RequiredTier => CompatTier.ExactVersion;
         internal override string Description =>
             "When the parameter compressor engages (over 256 sync bits), trailing bools ride " +
@@ -36,6 +32,14 @@ namespace FuryPlusPlus {
 
         internal override string ReportStats() {
             return CompressorScope.LanePackingStats;
+        }
+
+        internal override (string Text, string Tooltip)? ReportGain(Estimators.Result? analysis) {
+            var before = CompressorScope.ReportedStockBatches;
+            var after = CompressorScope.ReportedPackedBatches;
+            return before > after && after > 0
+                ? ($"sync rounds {before} → {after} last bake", CompressorScope.LanePackingStats)
+                : ((string, string)?)null;
         }
     }
 }

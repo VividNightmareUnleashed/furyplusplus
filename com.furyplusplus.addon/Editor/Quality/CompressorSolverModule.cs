@@ -26,16 +26,12 @@ namespace FuryPlusPlus {
      * reproduced when this solver wins (the strip-unused-params module automates the
      * main case instead).
      */
-    internal sealed class CompressorSolverModule : Module {
-        internal static CompressorSolverModule Instance { get; private set; }
-
-        internal CompressorSolverModule() {
-            Instance = this;
-        }
+    internal sealed class CompressorSolverModule : Module<CompressorSolverModule> {
 
         internal override string Id => "compressorSolver";
         internal override string DisplayName => "Compressor: exhaustive solver";
         internal override ModuleKind Kind => ModuleKind.Quality;
+        internal override string SettingsGroup => "Parameter compressor (sync bits)";
         internal override CompatTier RequiredTier => CompatTier.ExactVersion;
         internal override string Description =>
             "Searches every compressor option-set and slot-count combination instead of " +
@@ -54,6 +50,13 @@ namespace FuryPlusPlus {
 
         internal override string ReportStats() {
             return CompressorScope.SolverStats;
+        }
+
+        internal override (string Text, string Tooltip)? ReportGain(Estimators.Result? analysis) {
+            return CompressorScope.ReportedSolverBatches > 0
+                ? ($"{CompressorScope.ReportedSolverBatches} batches per sync last bake",
+                    CompressorScope.SolverStats)
+                : ((string, string)?)null;
         }
     }
 
@@ -222,6 +225,7 @@ namespace FuryPlusPlus {
                 new List<VRCExpressionsMenu.Control.ControlType>(bestSet));
             CompressorCompat.OutputOptions.SetValue(output, options);
 
+            CompressorScope.LastSolverBatches = bestBatches;
             CompressorScope.LastSolverImprovement =
                 $"{bestBatches} batches per sync at {bestCost}/{maxCost} bits " +
                 $"({bestCompressCount} params compressed, {evaluated} combinations searched)";

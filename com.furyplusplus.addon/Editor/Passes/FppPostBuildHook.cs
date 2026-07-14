@@ -47,13 +47,11 @@ namespace FuryPlusPlus {
 
             var index = ParamUsageIndex.Build(descriptor);
 
-            var strip = StripUnusedParamsModule.Instance;
-            var stripped = strip != null && ModuleRegistry.IsActive(strip) && strip.Enabled
+            var stripped = ModuleRegistry.IsOn(StripUnusedParamsModule.Instance)
                 ? StripUnusedParamsPass.Run(descriptor, index)
                 : new List<string>();
 
-            var narrow = NarrowIntParamsModule.Instance;
-            var narrowed = narrow != null && ModuleRegistry.IsActive(narrow) && narrow.Enabled
+            var narrowed = ModuleRegistry.IsOn(NarrowIntParamsModule.Instance)
                 ? NarrowIntParamsPass.Run(descriptor, index)
                 : new List<string>();
 

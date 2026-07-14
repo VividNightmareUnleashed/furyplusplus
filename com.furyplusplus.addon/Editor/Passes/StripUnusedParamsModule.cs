@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using System.Text.RegularExpressions;
 using HarmonyLib;
 using UnityEditor;
@@ -19,30 +18,32 @@ namespace FuryPlusPlus {
      *
      * Runs in FppPostBuildHook: after VRCFury's main build, before its compressor hook.
      */
-    internal sealed class StripUnusedParamsModule : Module {
-        internal static StripUnusedParamsModule Instance { get; private set; }
-
+    internal sealed class StripUnusedParamsModule : Module<StripUnusedParamsModule> {
         internal static readonly ModuleOption KeepDynamicsParams = new ModuleOption(
             "keepDynamicsParams", "Keep PhysBone/Contact parameters synced", false,
             "By default unread dynamics outputs are un-synced too (VRCFury's own guidance). " +
             "Enable if an external system relies on receiving them remotely.");
 
-        /** EditorPrefs (string): semicolon-separated wildcard patterns to never strip, e.g. \"FT/*;OSCm/*\". */
-        internal const string KeepListKey = Settings.KeyPrefix + "module.stripUnusedParams.keepList";
+        /** Shared with the Int-narrowing pass: parameters matching these globs are never touched. */
+        internal static readonly ModuleListOption KeepList = new ModuleListOption(
+            "keepList", "Keep-list (never strip/narrow)",
+            "Semicolon-separated wildcard patterns of parameters to never strip or narrow, " +
+            "e.g. \"FT/*;OSCm/*\".");
 
-        internal StripUnusedParamsModule() {
-            Instance = this;
-        }
+        private static readonly ModuleOption[] AllOptions = { KeepDynamicsParams };
+        private static readonly ModuleListOption[] AllListOptions = { KeepList };
 
         internal override string Id => "stripUnusedParams";
         internal override string DisplayName => "Strip unused synced parameters";
         internal override ModuleKind Kind => ModuleKind.Pass;
         internal override CompatTier RequiredTier => CompatTier.ExactVersion;
+        internal override string SettingsGroup => "Synced parameters";
         internal override string Description =>
             "Un-syncs expression parameters that no controller reads — reclaims sync bits " +
-            "without touching menus, OSC, or local behavior. Keep-list: " + KeepListKey;
+            "without touching menus, OSC, or local behavior.";
 
-        internal override IReadOnlyList<ModuleOption> Options => new[] { KeepDynamicsParams };
+        internal override IReadOnlyList<ModuleOption> Options => AllOptions;
+        internal override IReadOnlyList<ModuleListOption> ListOptions => AllListOptions;
 
         internal override void Install(Harmony harmony, VrcfuryCompat compat) {
             // No Harmony patches — this validates the reflection surface the pass needs and
@@ -53,30 +54,69 @@ namespace FuryPlusPlus {
         internal override string ReportStats() {
             return StripUnusedParamsPass.LastStats;
         }
+
+        internal override (string Text, string Tooltip)? ReportGain(Estimators.Result? analysis) {
+            if (analysis?.StrippableBits > 0) {
+                return ($"-{analysis.Value.StrippableBits} sync bits",
+                    $"{analysis.Value.StrippableParams} unused synced parameter(s) on the analyzed avatar.");
+            }
+            return StripUnusedParamsPass.LastBits > 0
+                ? ($"-{StripUnusedParamsPass.LastBits} sync bits last bake", StripUnusedParamsPass.LastStats)
+                : ((string, string)?)null;
+        }
+
+        /** The shared keep-list as compiled globs, with the user's current setting. */
+        internal static List<Regex> CurrentKeepGlobs() {
+            return Globs.Parse(Settings.GetListOption(Instance, KeepList));
+        }
     }
 
     internal static class StripUnusedParamsPass {
         internal static string LastStats;
+        internal static int LastBits;
 
         private static Type vrcfuryTestType;
-        private static MethodInfo isActuallyUploading;
+
+        internal enum KeepReason {
+            /** Strippable — no keep reason applies. */
+            None,
+            /** Not a synced named parameter at all. */
+            NotEligible,
+            Read,
+            Dynamics,
+            KeepList
+        }
 
         internal static void Resolve() {
             vrcfuryTestType = ReflectionUtils.Demand(
                 ReflectionUtils.FindType("VF.Model.VRCFuryTest"),
                 "VF.Model.VRCFuryTest"
             );
-            isActuallyUploading = ReflectionUtils.Demand(
-                ReflectionUtils.FindMethodWithSignature(
-                    ReflectionUtils.FindType("VF.Hooks.IsActuallyUploadingHook"), "Get", typeof(bool)
-                ),
-                "IsActuallyUploadingHook.Get()"
-            );
+            UploadCompat.DemandCore();
         }
 
         /** True when the avatar root carries VRCFury's build marker (i.e. VRCFury processed it). */
         internal static bool VrcfuryRanOn(GameObject avatarObject) {
             return vrcfuryTestType != null && avatarObject.GetComponent(vrcfuryTestType) != null;
+        }
+
+        /**
+         * The one strippability doctrine — Run applies it to the built avatar and
+         * Estimators.Analyze projects it onto the unbaked one, so the settings-window
+         * numbers can never drift from what the pass actually does.
+         */
+        internal static KeepReason Classify(
+            VRCExpressionParameters.Parameter parameter,
+            ParamUsageIndex index,
+            bool keepDynamics,
+            List<Regex> keepGlobs
+        ) {
+            if (parameter == null || !parameter.networkSynced) return KeepReason.NotEligible;
+            if (string.IsNullOrEmpty(parameter.name)) return KeepReason.NotEligible;
+            if (index.Reads.Contains(parameter.name)) return KeepReason.Read;
+            if (keepDynamics && index.DynamicsParams.Contains(parameter.name)) return KeepReason.Dynamics;
+            if (keepGlobs.Any(glob => glob.IsMatch(parameter.name))) return KeepReason.KeepList;
+            return KeepReason.None;
         }
 
         /** Returns the stripped parameter names (the hook handles the cross-platform gate). */
@@ -87,19 +127,14 @@ namespace FuryPlusPlus {
 
             var module = StripUnusedParamsModule.Instance;
             var keepDynamics = Settings.IsOptionEnabled(module, StripUnusedParamsModule.KeepDynamicsParams);
-            var keepGlobs = ParseKeepList(EditorPrefs.GetString(StripUnusedParamsModule.KeepListKey, ""));
+            var keepGlobs = StripUnusedParamsModule.CurrentKeepGlobs();
             var keptDynamics = 0;
             var bits = 0;
 
             foreach (var parameter in paramsAsset.parameters) {
-                if (parameter == null || !parameter.networkSynced) continue;
-                if (string.IsNullOrEmpty(parameter.name)) continue;
-                if (index.Reads.Contains(parameter.name)) continue;
-                if (index.DynamicsParams.Contains(parameter.name) && keepDynamics) {
-                    keptDynamics++;
-                    continue;
-                }
-                if (keepGlobs.Any(glob => glob.IsMatch(parameter.name))) continue;
+                var reason = Classify(parameter, index, keepDynamics, keepGlobs);
+                if (reason == KeepReason.Dynamics) keptDynamics++;
+                if (reason != KeepReason.None) continue;
 
                 parameter.networkSynced = false;
                 stripped.Add(parameter.name);
@@ -111,6 +146,7 @@ namespace FuryPlusPlus {
                 Log.Info($"Stripped sync from {stripped.Count} unused parameter(s), reclaiming {bits} bits: " +
                          string.Join(", ", stripped));
             }
+            LastBits = stripped.Count == 0 ? 0 : bits;
             LastStats = stripped.Count == 0
                 ? null
                 : $"stripped={stripped.Count} bits={bits}" + (keptDynamics > 0 ? $" keptDynamics={keptDynamics}" : "");
@@ -141,13 +177,11 @@ namespace FuryPlusPlus {
                 return true;
             }
 
-            bool uploading;
-            try {
-                uploading = (bool)isActuallyUploading.Invoke(null, null);
-            } catch {
-                uploading = false;
+            // Failure default: assume NOT uploading, so a broken gate never records a
+            // desktop decision for a build that may not ship.
+            if (UploadCompat.IsActuallyUploading(assumeOnFailure: false)) {
+                FppSidecar.SaveDesktopDecision(blueprintId, stripped, narrowed);
             }
-            if (uploading) FppSidecar.SaveDesktopDecision(blueprintId, stripped, narrowed);
             return true;
         }
 
@@ -158,17 +192,6 @@ namespace FuryPlusPlus {
                 return component.GetType().GetField("blueprintId")?.GetValue(component) as string;
             }
             return null;
-        }
-
-        private static List<Regex> ParseKeepList(string raw) {
-            var globs = new List<Regex>();
-            foreach (var entry in raw.Split(';')) {
-                var trimmed = entry.Trim();
-                if (trimmed.Length == 0) continue;
-                var pattern = "^" + Regex.Escape(trimmed).Replace(@"\*", ".*").Replace(@"\?", ".") + "$";
-                globs.Add(new Regex(pattern, RegexOptions.CultureInvariant));
-            }
-            return globs;
         }
     }
 }

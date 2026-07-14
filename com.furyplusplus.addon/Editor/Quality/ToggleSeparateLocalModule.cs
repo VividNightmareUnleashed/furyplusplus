@@ -16,16 +16,12 @@ namespace FuryPlusPlus {
      * Default OFF: unlike the ports, this changes animator topology for a whole class of
      * hand-tested toggles at once; enable after checking your own local/remote variants.
      */
-    internal sealed class ToggleSeparateLocalModule : Module {
-        internal static ToggleSeparateLocalModule Instance { get; private set; }
-
-        internal ToggleSeparateLocalModule() {
-            Instance = this;
-        }
+    internal sealed class ToggleSeparateLocalModule : Module<ToggleSeparateLocalModule> {
 
         internal override string Id => "toggleSeparateLocal";
         internal override string DisplayName => "Separate-local toggles → blendtree";
         internal override ModuleKind Kind => ModuleKind.Quality;
+        internal override string SettingsGroup => "Animator layers";
         internal override CompatTier RequiredTier => CompatTier.ExactVersion;
         internal override bool DefaultEnabled => false;
         internal override string Description =>
@@ -42,10 +38,18 @@ namespace FuryPlusPlus {
         internal override string ReportStats() {
             return ToggleSeparateLocalPass.LastStats;
         }
+
+        internal override (string Text, string Tooltip)? ReportGain(Estimators.Result? analysis) {
+            return ToggleSeparateLocalPass.LastConverted > 0
+                ? ($"{ToggleSeparateLocalPass.LastConverted} toggles → blendtree last bake",
+                    ToggleSeparateLocalPass.LastStats)
+                : ((string, string)?)null;
+        }
     }
 
     internal static class ToggleSeparateLocalPass {
         internal static string LastStats;
+        internal static int LastConverted;
 
         private sealed class Match {
             internal ToggleConversionRuntime.Entry Entry;
@@ -80,6 +84,7 @@ namespace FuryPlusPlus {
                     Log.Info($"Converted {converted.Count} separate-local toggle layer(s) to blendtree: " +
                              string.Join(", ", converted));
                     LastStats = $"converted={converted.Count}";
+                    LastConverted = converted.Count;
                 }
             } catch (System.Exception e) {
                 Log.Warn("Separate-local toggle conversion skipped: " + e.Message);

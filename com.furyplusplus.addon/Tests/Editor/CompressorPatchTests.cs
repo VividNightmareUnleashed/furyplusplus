@@ -154,7 +154,7 @@ namespace FuryPlusPlus.Tests.Editor {
             CompressorScope.RunActive = true;
             CompressorScope.LanePackingActive = false;
             CompressorScope.Sub8Active = true;
-            CompressorScope.Sub8Globs = CompressorScope.ParseGlobs("pack/*");
+            CompressorScope.Sub8Globs = Globs.Parse("pack/*");
             var pairs = CompressorScope.ComputeSub8Pairs(compress);
             var batches = Batches(decision);
             CompressorScope.RunActive = false;

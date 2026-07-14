@@ -75,21 +75,12 @@ namespace FuryPlusPlus {
         }
 
         private static void InstallDetailedTargets(IEnumerable<(string TypeName, string[] MethodNames)> targets) {
-            foreach (var (typeName, methodNames) in targets) {
-                foreach (var methodName in methodNames) {
-                    foreach (var method in ReflectionUtils.FindDeclaredMethods(typeName, methodName)) {
-                        try {
-                            harmonyInstance.Patch(
-                                method,
-                                prefix: new HarmonyMethod(typeof(ProfilePatches), nameof(MethodPrefix)),
-                                finalizer: new HarmonyMethod(typeof(ProfilePatches), nameof(MethodFinalizer))
-                            );
-                        } catch (Exception e) {
-                            Log.Warn($"Could not profile {typeName}.{methodName}: {e.Message}");
-                        }
-                    }
-                }
-            }
+            PatchUtils.PatchAllBestEffort(
+                harmonyInstance,
+                targets,
+                new HarmonyMethod(typeof(ProfilePatches), nameof(MethodPrefix)),
+                new HarmonyMethod(typeof(ProfilePatches), nameof(MethodFinalizer)),
+                "Could not profile");
         }
 
         private static readonly List<(string TypeName, string[] MethodNames)> ExtraDetailedTargets =
@@ -351,6 +342,19 @@ namespace FuryPlusPlus {
         internal static void SetLastReport(string report) {
             LastReport = report ?? "";
             SessionState.SetString("FuryPlusPlus.LastProfile", LastReport);
+        }
+
+        /** Prints the most recent report (falling back to the session copy) to the console. */
+        public static void LogLastReport() {
+            var report = LastReport;
+            if (string.IsNullOrEmpty(report)) {
+                report = SessionState.GetString("FuryPlusPlus.LastProfile", "");
+            }
+            if (string.IsNullOrEmpty(report)) {
+                Log.Info("No profile report captured yet — run a VRCFury bake first.");
+            } else {
+                UnityEngine.Debug.Log(report);
+            }
         }
     }
 }

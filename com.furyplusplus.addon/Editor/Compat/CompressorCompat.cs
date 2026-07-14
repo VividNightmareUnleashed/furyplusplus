@@ -47,15 +47,10 @@ namespace FuryPlusPlus {
         internal static MethodInfo ParamsGetReadOnly;         // ParamsService.GetReadOnlyParams()
         internal static MethodInfo GetMaxCost;                // VRCExpressionParametersExtensions.GetMaxCost()
         internal static MethodInfo ParamsClone;               // VRCExpressionParametersExtensions.Clone(paramz)
-        internal static MethodInfo CalcTotalCost;             // (VRCExpressionParameters) → int  [SDK public, resolved for symmetry]
 
         internal static MethodInfo ControllersGetAllReadOnly; // ControllersService.GetAllReadOnlyControllers()
-        internal static MethodInfo IsNetworkSynced;           // VRCExpressionParameterExtensions.IsNetworkSynced(param)
-        internal static MethodInfo ParamTypeCost;             // VRCExpressionParameterExtensions.TypeCost(param)
 
         internal static MethodInfo CompressorMenuItemGet;     // CompressorMenuItem.Get()
-        internal static Type SneakyExceptionType;
-        internal static MethodInfo ThrowIfActuallyUploading;  // ExceptionService.ThrowIfActuallyUploading(Exception)
 
         internal static MethodInfo ClipSetAap;                // AnimationClipExtensions.SetAap(clip, string, FloatOrObjectCurve)
         internal static MethodInfo FloatToCurve;              // FloatOrObjectCurve.op_Implicit(float)
@@ -128,12 +123,8 @@ namespace FuryPlusPlus {
             ParamsGetReadOnly = paramsServiceType == null ? null : ReflectionUtils.FindUniqueMethod(
                 paramsServiceType, "GetReadOnlyParams", method => method.GetParameters().Length == 0);
             var paramsExtType = ReflectionUtils.FindType("VF.Utils.VRCExpressionParametersExtensions");
-            if (paramsExtType != null) {
-                GetMaxCost = ReflectionUtils.FindUniqueMethod(paramsExtType, "GetMaxCost",
-                    method => method.GetParameters().Length == 0);
-                CalcTotalCost = ReflectionUtils.FindUniqueMethod(paramsExtType, "CalcTotalCost",
-                    method => method.GetParameters().Length == 1);
-            }
+            GetMaxCost = paramsExtType == null ? null : ReflectionUtils.FindUniqueMethod(
+                paramsExtType, "GetMaxCost", method => method.GetParameters().Length == 0);
             // paramz.Clone() is the generic ObjectExtensions.Clone<T>(original, reason, prefix, recursive).
             var objectExtType = ReflectionUtils.FindType("VF.Utils.ObjectExtensions");
             var openClone = objectExtType?
@@ -153,22 +144,9 @@ namespace FuryPlusPlus {
                     method => method.GetParameters().Length == 0);
             }
 
-            var paramExtType = ReflectionUtils.FindType("VF.Utils.VRCExpressionParameterExtensions");
-            if (paramExtType != null) {
-                IsNetworkSynced = ReflectionUtils.FindUniqueMethod(paramExtType, "IsNetworkSynced",
-                    method => method.GetParameters().Length == 1);
-                ParamTypeCost = ReflectionUtils.FindUniqueMethod(paramExtType, "TypeCost",
-                    method => method.GetParameters().Length == 1
-                              && !method.GetParameters()[0].ParameterType.IsEnum);
-            }
-
             var menuItemType = ReflectionUtils.FindType("VF.Menu.CompressorMenuItem");
             CompressorMenuItemGet = menuItemType == null ? null : ReflectionUtils.FindUniqueMethod(
                 menuItemType, "Get", method => method.GetParameters().Length == 0);
-            SneakyExceptionType = ReflectionUtils.FindType("VF.Exceptions.SneakyException");
-            var excServiceType = ReflectionUtils.FindType("VF.Service.ExceptionService");
-            ThrowIfActuallyUploading = excServiceType == null ? null : ReflectionUtils.FindUniqueMethod(
-                excServiceType, "ThrowIfActuallyUploading", method => method.GetParameters().Length == 1);
 
             // SetAap(clip, name, FloatOrObjectCurve) — the curve arg converts from float via op_Implicit.
             var clipExtType = ReflectionUtils.FindType("VF.Utils.AnimationClipExtensions");

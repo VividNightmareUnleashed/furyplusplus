@@ -6,16 +6,12 @@ namespace FuryPlusPlus {
      * opt-in detailed tier (~40 per-method trampolines on VRCFury's hottest internals).
      * Works on any VRCFury version (Profiling tier).
      */
-    internal sealed class ProfilingModule : Module {
-        internal static ProfilingModule Instance { get; private set; }
-
-        internal ProfilingModule() {
-            Instance = this;
-        }
+    internal sealed class ProfilingModule : Module<ProfilingModule> {
 
         internal override string Id => "profiling";
         internal override string DisplayName => "Bake profiler";
         internal override ModuleKind Kind => ModuleKind.Cosmetic;
+        internal override string SettingsGroup => "Editor visuals";
         internal override CompatTier RequiredTier => CompatTier.Profiling;
         internal override string Description =>
             "Logs a per-phase timing report after every VRCFury bake. " +

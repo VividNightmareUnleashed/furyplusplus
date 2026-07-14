@@ -191,7 +191,7 @@ namespace FuryPlusPlus {
                 };
                 holder.SetActive(false);
                 var clone = Object.Instantiate(processedAvatar, holder.transform);
-                clone.name = processedAvatar.name.Replace("(Clone)", "").Trim();
+                clone.name = BakeFingerprint.NormalizeAvatarName(processedAvatar.name);
                 StripDontSaveComponents(clone);
                 ClearHideFlags(clone);
                 Phase("clone");
@@ -373,8 +373,9 @@ namespace FuryPlusPlus {
             return string.Join(", ", parts);
         }
 
+        /** One definition of "transient" — see BakeFingerprint.IsTransientPath. */
         internal static bool IsTransientPath(string path) {
-            return path.StartsWith("Packages/com.vrcfury.temp") || path.Contains("/__Generated/");
+            return BakeFingerprint.IsTransientPath(path);
         }
 
         /**

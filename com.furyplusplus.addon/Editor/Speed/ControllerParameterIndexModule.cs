@@ -12,16 +12,12 @@ namespace FuryPlusPlus {
      * parameter it creates. Keep an exact name index during the build and use Unity's
      * native AddParameter API, while invalidating around the handful of bulk rewrites.
      */
-    internal sealed class ControllerParameterIndexModule : Module {
-        internal static ControllerParameterIndexModule Instance { get; private set; }
-
-        internal ControllerParameterIndexModule() {
-            Instance = this;
-        }
+    internal sealed class ControllerParameterIndexModule : Module<ControllerParameterIndexModule> {
 
         internal override string Id => "controllerParameterIndex";
         internal override string DisplayName => "Controller parameter index";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Controllers & animation";
         internal override string Description =>
             "O(1) animator-parameter lookups during the build instead of per-call array scans.";
 
@@ -42,7 +38,8 @@ namespace FuryPlusPlus {
 
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
             var type = ReflectionUtils.FindType("VF.Utils.Controller.VFController");
-            controllerField = type?.GetField("ctrl", BindingFlags.Instance | BindingFlags.NonPublic);
+            ClipCurveCompat.EnsureResolved();
+            controllerField = ClipCurveCompat.ControllerCtrlField;
             var getParam = ReflectionUtils.FindMethodWithSignature(
                 type,
                 "GetParam",

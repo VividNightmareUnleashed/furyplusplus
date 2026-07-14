@@ -10,9 +10,7 @@ namespace FuryPlusPlus {
      * Replaces only the compiler-generated path-mapping lambda inside
      * ObjectMoveService.ApplyDeferred. Controller/clip traversal remains VRCFury's own code.
      */
-    internal sealed class OrderedPathRewriteModule : Module {
-        internal static OrderedPathRewriteModule Instance { get; private set; }
-
+    internal sealed class OrderedPathRewriteModule : Module<OrderedPathRewriteModule> {
         internal static readonly ModuleOption SkipEmptyDeferredOption = new ModuleOption(
             "skipEmptyDeferred",
             "Skip empty deferred rewrites",
@@ -20,17 +18,16 @@ namespace FuryPlusPlus {
             "Skip the full identity rewrite of every managed clip and mask when no deferred moves were recorded."
         );
 
-        internal OrderedPathRewriteModule() {
-            Instance = this;
-        }
+        private static readonly ModuleOption[] AllOptions = { SkipEmptyDeferredOption };
 
         internal override string Id => "orderedPathRewrite";
         internal override string DisplayName => "Ordered path rewrite";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Paths & rewriting";
         internal override string Description =>
             "Trie-based chronological path rewriting for deferred Armature Link moves.";
 
-        internal override IReadOnlyList<ModuleOption> Options => new[] { SkipEmptyDeferredOption };
+        internal override IReadOnlyList<ModuleOption> Options => AllOptions;
 
         internal override void Install(Harmony harmony, VrcfuryCompat compat) {
             ArmatureCompat.EnsureResolved();

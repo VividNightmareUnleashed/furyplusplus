@@ -13,16 +13,12 @@ namespace FuryPlusPlus {
      * ArmatureLink), so the answer for a binding cannot change; a defensive flush on any
      * ObjectMoveService.Move keeps us honest if upstream ever reorders.
      */
-    internal sealed class MergePathCacheModule : Module {
-        internal static MergePathCacheModule Instance { get; private set; }
-
-        internal MergePathCacheModule() {
-            Instance = this;
-        }
+    internal sealed class MergePathCacheModule : Module<MergePathCacheModule> {
 
         internal override string Id => "mergePathCache";
         internal override string DisplayName => "Full Controller merge path cache";
         internal override ModuleKind Kind => ModuleKind.Speed;
+        internal override string SettingsGroup => "Paths & rewriting";
         internal override string Description =>
             "Caches binding-path validation during Full Controller merges — the dominant " +
             "cost on avatars assembled from many prefab controllers.";

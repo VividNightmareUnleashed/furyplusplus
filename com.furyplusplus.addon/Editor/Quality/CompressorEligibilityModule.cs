@@ -17,22 +17,33 @@ namespace FuryPlusPlus {
      * append. Desktop-only in effect: mobile replays the desktop decision from VRCFury's
      * alignment file.
      */
-    internal sealed class CompressorEligibilityModule : Module {
-        internal static CompressorEligibilityModule Instance { get; private set; }
+    internal sealed class CompressorEligibilityModule : Module<CompressorEligibilityModule> {
+        /** Extra synced params (wildcards) to hand to the compressor; empty = module inert. */
+        internal static readonly ModuleListOption ExtraList = new ModuleListOption(
+            "extraList", "Extra compressible params",
+            "Semicolon-separated wildcard patterns of synced parameters to add to the " +
+            "compressor's eligible set. List params you know change rarely.");
 
-        internal CompressorEligibilityModule() {
-            Instance = this;
-        }
+        private static readonly ModuleListOption[] AllListOptions = { ExtraList };
 
         internal override string Id => "compressorEligibility";
         internal override string DisplayName => "Compressor: extra eligible params (opt-in list)";
         internal override ModuleKind Kind => ModuleKind.Quality;
         internal override CompatTier RequiredTier => CompatTier.ExactVersion;
+        internal override string SettingsGroup => "Parameter compressor (sync bits)";
         internal override string Description =>
             "Adds listed synced parameters to the compressor's eligible set (params stock " +
-            "won't compress because no menu control drives them). Inert until the list is " +
-            "filled: " + CompressorScope.EligibilityListKey + " (semicolon-separated wildcards). " +
-            "Menu-button params and Add-driven params are excluded automatically.";
+            "won't compress because no menu control drives them). Inert until the list below " +
+            "is filled. Menu-button params and Add-driven params are excluded automatically.";
+
+        internal override IReadOnlyList<ModuleListOption> ListOptions => AllListOptions;
+
+        internal override (string Text, string Tooltip)? ReportGain(Estimators.Result? analysis) {
+            return CompressorScope.ReportedEligibilityAdded > 0
+                ? ($"+{CompressorScope.ReportedEligibilityAdded} params compressed last bake",
+                    CompressorScope.EligibilityStats)
+                : ((string, string)?)null;
+        }
 
         internal override void Install(Harmony harmony, VrcfuryCompat compat) {
             CompressorScope.EnsureInstalled(harmony);
