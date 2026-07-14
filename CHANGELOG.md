@@ -4,7 +4,10 @@
 
 - **Bake cache replay (experimental, default off):** on a whole-chain fingerprint HIT the entire
   NDMF+VRCFury preprocessor chain is skipped and the avatar is restored in place from a cached
-  snapshot of the previous processed result — repeat play-mode bakes become near-instant.
+  snapshot of the previous processed result. The restore takes well under a second; total play
+  entry is meaningfully faster but still dominated by Unity's normal scene/avatar startup. The
+  bigger win is resource load: the CPU-heavy bake never runs, so entering play mode is far
+  lighter on CPU/memory/disk — most noticeable on weaker PCs or while working in VR.
   Snapshots (processed-avatar prefab + deep copies of every transient dependency) live in
   `Packages/com.furyplusplus.bakecache`, are replaced atomically after each successful bake, and
   are validated against the sidecar's fingerprint hashes before every replay. Play-mode only;

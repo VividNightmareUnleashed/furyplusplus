@@ -46,10 +46,15 @@ namespace FuryPlusPlus {
             "EXPERIMENTAL. When nothing that could influence the bake has changed since the " +
             "last successful play-mode bake (verified by the bake-cache fingerprint), restores " +
             "the avatar from a cached snapshot of the processed result and skips the entire " +
-            "NDMF+VRCFury preprocessor chain — repeat play-mode bakes become near-instant. " +
-            "Snapshots live in Packages/com.furyplusplus.bakecache (safe to delete). Uploads " +
-            "are never cached. Not available for avatars that reference scene objects outside " +
-            "their own hierarchy; AudioLink's play-mode refresh is skipped on replayed bakes.";
+            "NDMF+VRCFury preprocessor chain. The restore itself takes well under a second, " +
+            "but total play entry is still dominated by Unity's normal scene/avatar startup — " +
+            "expect meaningfully faster, not instant. The bigger win is that the CPU-heavy " +
+            "bake (mesh baking, animator merging, compressor solving, asset writes) simply " +
+            "never runs, so entering play mode needs far less CPU/memory/disk — most " +
+            "noticeable on weaker PCs or while in VR. Snapshots live in " +
+            "Packages/com.furyplusplus.bakecache (safe to delete). Uploads are never cached. " +
+            "Not available for avatars that reference scene objects outside their own " +
+            "hierarchy; AudioLink's play-mode refresh is skipped on replayed bakes.";
 
         internal override void Install(Harmony harmony, VrcfuryCompat compat) {
             var dryRun = ModuleRegistry.Find("bakeCacheDryRun");
