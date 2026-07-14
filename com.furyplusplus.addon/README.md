@@ -36,12 +36,27 @@ later VRCFury versions are compatible with the version-pinned modules.
 1. Install VRCFury normally and confirm the avatar builds without FuryPlusPlus.
 2. If QuickFury is installed, remove it. (FuryPlusPlus suppresses QuickFury's patches while it is
    present, but the package should not stay installed.)
-3. In Unity, choose **Window > Package Manager**, use **+ > Add package from disk**, and select
-   this package's `package.json`.
+3. Add the package through the Creator Companion or by hand — both methods below.
 4. Wait for the Editor to recompile. The Console should report
    `[FuryPlusPlus] Ready: 44/44 modules installed for VRCFury 1.1363.0`.
 
-For a local file dependency, the equivalent `Packages/manifest.json` entry is:
+### Via the VRChat Creator Companion (recommended)
+
+Open the [FuryPlusPlus package listing](https://vividnightmareunleashed.github.io/furyplusplus/)
+and press **Add to VCC**, or paste the listing URL under **Settings > Packages > Add Repository**:
+
+```text
+https://vividnightmareunleashed.github.io/furyplusplus/index.json
+```
+
+Then open your avatar project's **Manage Project** page and add **FuryPlusPlus**. Updates arrive
+through the Creator Companion like any other package.
+
+### From a release zip or local clone
+
+In Unity, choose **Window > Package Manager**, use **+ > Add package from disk**, and select this
+package's `package.json`. For a local file dependency, the equivalent `Packages/manifest.json`
+entry is:
 
 ```json
 "com.furyplusplus.addon": "file:C:/path/to/furyplusplus/com.furyplusplus.addon"
