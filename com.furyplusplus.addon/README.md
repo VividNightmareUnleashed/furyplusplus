@@ -1,18 +1,19 @@
 # FuryPlusPlus
 
 FuryPlusPlus is an Editor-only, bolt-on layer for an existing VRCFury installation, covering both
-**bake speed** and (in upcoming releases) **output quality** — fewer animator layers, fewer synced
-parameter bits. It profiles VRCFury's bake and replaces measured hot paths with indexed
-implementations. It does not ship, fork, or modify VRCFury.
+**bake speed** and **output quality** — fewer animator layers, fewer synced parameter bits. It
+profiles VRCFury's bake, replaces measured hot paths with indexed implementations, and adds
+conservative post-build passes that shrink the baked result. It does not ship, fork, or modify
+VRCFury.
 
 FuryPlusPlus is the successor to **QuickFury** and includes ports of all 21 of its validated speed
 patches. The two cannot run together: while QuickFury is installed, FuryPlusPlus disables
 QuickFury's patches each session and warns. Remove `com.quickfury.addon` (settings do not carry
 over).
 
-FuryPlusPlus 0.1.0 is tested against VRCFury 1.1363.0. On the reference avatar it reduced a warm
-VRCFury bake from **93.8 seconds (stock) to 12.6 seconds**, timing-equivalent to QuickFury 1.2.4
-on the same avatar (12.0 s, within run-to-run variance).
+FuryPlusPlus 1.0.0 is tested against VRCFury 1.1363.0. On the reference avatar it reduced a warm
+VRCFury bake from **93.8 seconds (stock) to 11–12 seconds**, and its output-quality passes cut
+the avatar's synced parameter data from **444 to 177 bits**.
 
 ## Requirements and compatibility
 
@@ -38,7 +39,7 @@ later VRCFury versions are compatible with the version-pinned modules.
 3. In Unity, choose **Window > Package Manager**, use **+ > Add package from disk**, and select
    this package's `package.json`.
 4. Wait for the Editor to recompile. The Console should report
-   `[FuryPlusPlus] Ready: 19/19 modules installed for VRCFury 1.1363.0`.
+   `[FuryPlusPlus] Ready: 44/44 modules installed for VRCFury 1.1363.0`.
 
 For a local file dependency, the equivalent `Packages/manifest.json` entry is:
 
@@ -72,6 +73,40 @@ gives an immediate stock-VRCFury control run.
 - **Covered SPS mesh probe skip** and **SPS material probe cache**.
 - **Tracking behaviour index** and **behaviour container filter**.
 - Two conservative SaveAssets scan-skips remain experimental and default off.
+
+### Additional build speed modules
+
+- **Layer-to-tree binding index**, **compressor memoization**, **GetLayers cache**, **Full
+  Controller merge path memo**, and a **motion-graph traversal cache** (shadow-validated):
+  further measured hot-path replacements beyond the QuickFury ports.
+- **Fast blendshape optimizer bake**: one-pass rewrite of Blendshape Optimizer's bake step, with
+  a default-on fix for VRCFury's multi-frame interpolation frame selection (stock behavior
+  selectable per sub-toggle).
+- **Play-mode pass skipping**: passes that only matter for uploads (mipmap streaming fix, menu
+  icon textures, final validation) are skipped during play-mode test builds.
+
+### Output quality modules (change bake output)
+
+- **Unused synced-parameter stripper**: un-syncs (never deletes) synced expression parameters no
+  controller reads, with keep-list globs and a keep-dynamics option.
+- **Int-to-Bool narrowing**: synced Ints whose entire observable usage is 0/1 become Bools.
+- **Compressor family**: trailing-bool lane packing, an exhaustive batch solver, user-listed
+  eligibility additions, and optional sub-8-bit packing of paired floats. Desktop/mobile
+  alignment is guarded by a build sidecar that fails divergent mobile builds.
+- **Full-scope DBT**, **no-op curve stripping**, **clip dedup**, **off-side elimination**, and
+  **DBT layer consolidation**: fewer FX layers and smaller controllers through VRCFury's own
+  optimizer plus conservative post-passes.
+- **Toggle conversions** (default off): "Separate Local State" layers and pure-crossfade toggles
+  become blendtree branches; see the module descriptions for the documented feel deltas.
+
+### Play-mode iteration (experimental, default off)
+
+- **Bake cache + replay**: fingerprints every play-mode bake; on an exact match the whole
+  NDMF+VRCFury preprocessor chain is skipped and the avatar restores from a snapshot in well
+  under a second. Play entry becomes meaningfully faster and far lighter on CPU/memory/disk.
+  Uploads are never cached.
+- **No-disk-save**: skips VRCFury's end-of-bake disk serialization during play-mode test builds.
+- **Dry-run telemetry**: logs would-have-hit verdicts and potential savings without replaying.
 
 ### Profiling
 

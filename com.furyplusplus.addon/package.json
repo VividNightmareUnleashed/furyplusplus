@@ -1,7 +1,7 @@
 {
   "name": "com.furyplusplus.addon",
   "displayName": "FuryPlusPlus",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "unity": "2022.3",
   "description": "Bolt-on speed and output-quality layer for VRCFury avatar bakes. Faster builds, fewer animator layers, fewer sync bits.",
   "author": {
