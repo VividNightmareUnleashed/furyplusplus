@@ -78,7 +78,9 @@ namespace FuryPlusPlus {
         private static GUIStyle redRightStyle;
         private static GUIStyle greenRightStyle;
         private static GUIStyle miniRightStyle;
+        private static GUIStyle footerStyle;
         private static GUIContent infoIcon;
+        private static string addonVersion;
         private static Color gaugeBack;
         private static Color gaugeFill;
         private static Color zebraTint;
@@ -144,6 +146,8 @@ namespace FuryPlusPlus {
             greenRightStyle.normal.textColor = green;
             greenRightStyle.hover.textColor = green;
             miniRightStyle = new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.MiddleRight };
+            footerStyle = new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.MiddleCenter };
+            footerStyle.hover.textColor = EditorStyles.linkLabel.normal.textColor;
             gaugeBack = EditorGUIUtility.isProSkin
                 ? new Color(1f, 1f, 1f, 0.08f)
                 : new Color(0f, 0f, 0f, 0.12f);
@@ -214,6 +218,34 @@ namespace FuryPlusPlus {
             }
 
             EditorGUILayout.EndScrollView();
+            DrawFooter();
+        }
+
+        /** Pinned under the scroll view so the credit stays visible at any window size. */
+        private static void DrawFooter() {
+            const string url = "https://github.com/VividNightmareUnleashed";
+            var content = new GUIContent($"FuryPlusPlus {AddonVersion} — by vividnightmare", url);
+            var line = GUILayoutUtility.GetRect(content, footerStyle);
+            // Hit area only over the text, not the whole row.
+            var size = footerStyle.CalcSize(content);
+            var rect = new Rect(line.x + (line.width - size.x) / 2f, line.y, size.x, line.height);
+            EditorGUIUtility.AddCursorRect(rect, MouseCursor.Link);
+            if (GUI.Button(rect, content, footerStyle)) Application.OpenURL(url);
+            EditorGUILayout.Space(2);
+        }
+
+        private static string AddonVersion {
+            get {
+                if (addonVersion == null) {
+                    try {
+                        addonVersion = UnityEditor.PackageManager.PackageInfo
+                            .FindForAssembly(typeof(SettingsWindow).Assembly)?.version ?? "unknown";
+                    } catch {
+                        addonVersion = "unknown";
+                    }
+                }
+                return addonVersion;
+            }
         }
 
         private void DrawTab(TabDef def) {
