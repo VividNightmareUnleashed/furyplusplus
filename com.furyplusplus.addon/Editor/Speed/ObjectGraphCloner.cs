@@ -34,8 +34,13 @@ namespace FuryPlusPlus {
          * classified once; traversal continues only THROUGH Clone-classified objects (AsIs
          * objects are opaque leaves), so persisted assets never drag their own dependency
          * trees in. Cycle-safe. The roots themselves are traversed, never classified.
+         *
+         * `inspect` (optional) skips property iteration entirely for objects that cannot hold
+         * relevant references (still classified, just opaque) — SerializedObject visits every
+         * mesh vertex byte and animation keyframe as an individual property otherwise.
          */
-        internal static WalkResult Walk(IEnumerable<Object> roots, Func<Object, RefKind> classify) {
+        internal static WalkResult Walk(IEnumerable<Object> roots, Func<Object, RefKind> classify,
+            Func<Object, bool> inspect = null) {
             var result = new WalkResult();
             var seen = new HashSet<Object>();
             var queue = new Queue<Object>();
@@ -43,7 +48,9 @@ namespace FuryPlusPlus {
                 if (root != null) queue.Enqueue(root);
             }
             while (queue.Count > 0) {
-                foreach (var reference in CollectObjectReferences(queue.Dequeue())) {
+                var current = queue.Dequeue();
+                if (inspect != null && !inspect(current)) continue;
+                foreach (var reference in CollectObjectReferences(current)) {
                     if (!seen.Add(reference)) continue;
                     switch (classify(reference)) {
                         case RefKind.Clone:
@@ -79,13 +86,17 @@ namespace FuryPlusPlus {
          * must include the copies themselves — their references still point at the originals
          * until this runs. m_Script is never rewritten.
          */
-        internal static void Remap(IEnumerable<Object> targets, IReadOnlyDictionary<Object, Object> map) {
+        internal static void Remap(IEnumerable<Object> targets, IReadOnlyDictionary<Object, Object> map,
+            Func<Object, bool> inspect = null) {
             foreach (var target in targets) {
                 if (target == null) continue;
+                if (inspect != null && !inspect(target)) continue;
                 using (var serialized = new SerializedObject(target)) {
                     var iterator = serialized.GetIterator();
                     var dirty = false;
-                    while (iterator.Next(true)) {
+                    var enterChildren = true;
+                    while (iterator.Next(enterChildren)) {
+                        enterChildren = EnterChildren(iterator);
                         if (iterator.propertyType != SerializedPropertyType.ObjectReference) continue;
                         if (iterator.propertyPath == "m_Script") continue;
                         var value = iterator.objectReferenceValue;
@@ -104,13 +115,28 @@ namespace FuryPlusPlus {
             if (obj == null) return references;
             using (var serialized = new SerializedObject(obj)) {
                 var iterator = serialized.GetIterator();
-                while (iterator.Next(true)) {
+                var enterChildren = true;
+                while (iterator.Next(enterChildren)) {
+                    enterChildren = EnterChildren(iterator);
                     if (iterator.propertyType != SerializedPropertyType.ObjectReference) continue;
                     var value = iterator.objectReferenceValue;
                     if (value != null) references.Add(value);
                 }
             }
             return references;
+        }
+
+        /** Primitive/string arrays cannot contain object references; visiting every element
+         *  as an individual SerializedProperty is where graph passes burn their time. */
+        private static readonly HashSet<string> PrimitiveArrayElements = new HashSet<string> {
+            "bool", "byte", "sbyte", "char", "short", "ushort", "int", "uint",
+            "long", "ulong", "float", "double", "string",
+        };
+
+        private static bool EnterChildren(SerializedProperty property) {
+            if (property.propertyType == SerializedPropertyType.ObjectReference) return false;
+            if (property.propertyType == SerializedPropertyType.String) return false;
+            return !(property.isArray && PrimitiveArrayElements.Contains(property.arrayElementType));
         }
     }
 }

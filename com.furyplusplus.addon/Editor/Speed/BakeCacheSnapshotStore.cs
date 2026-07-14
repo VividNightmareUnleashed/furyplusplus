@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Text;
 using UnityEditor;
 using UnityEngine;
 using Object = UnityEngine.Object;
@@ -174,6 +175,13 @@ namespace FuryPlusPlus {
                 return false;
             }
             var timer = System.Diagnostics.Stopwatch.StartNew();
+            var phases = new StringBuilder();
+            var phaseStartMs = 0L;
+            void Phase(string name) {
+                phases.Append(name).Append('=')
+                    .Append(timer.ElapsedMilliseconds - phaseStartMs).Append("ms ");
+                phaseStartMs = timer.ElapsedMilliseconds;
+            }
             var folder = SnapshotFolder(key);
             GameObject holder = null;
             try {
@@ -185,6 +193,7 @@ namespace FuryPlusPlus {
                 clone.name = processedAvatar.name.Replace("(Clone)", "").Trim();
                 StripDontSaveComponents(clone);
                 ClearHideFlags(clone);
+                Phase("clone");
 
                 var cloneRoot = clone.transform;
                 var components = new List<Object>();
@@ -193,7 +202,9 @@ namespace FuryPlusPlus {
                     // m_Father is the capture holder, which must not look like an external ref.
                     if (component != null && !(component is Transform)) components.Add(component);
                 }
-                var walk = ObjectGraphCloner.Walk(components, obj => Classify(obj, cloneRoot));
+                var walk = ObjectGraphCloner.Walk(
+                    components, obj => Classify(obj, cloneRoot), CanHoldReferences);
+                Phase("walk");
                 if (walk.HasRejections) {
                     Log.Info("Bake cache: snapshot refused — the processed avatar references " +
                              "objects that cannot be cached: " + DescribeSample(walk.Rejected));
@@ -201,6 +212,7 @@ namespace FuryPlusPlus {
                 }
 
                 var map = ObjectGraphCloner.CloneAll(walk.ToClone);
+                Phase("copy");
                 try {
                     AssetDatabase.DeleteAsset(folder);
                     if (!AssetDatabase.IsValidFolder(SnapshotsFolder)) {
@@ -210,40 +222,48 @@ namespace FuryPlusPlus {
 
                     var textureCount = 0;
                     var containerCount = 0;
-                    BakeCacheContainer container = null;
-                    var inContainer = 0;
-                    foreach (var original in walk.ToClone) {
-                        var copy = map[original];
-                        // Texture2Ds get their own files (NDMF's pattern: big binary blobs
-                        // inside shared containers make every container reimport slow).
-                        if (copy is Texture2D) {
-                            AssetDatabase.CreateAsset(copy,
-                                $"{folder}/tex-{textureCount:000}-{BakeFingerprint.SanitizeKey(copy.name)}.asset");
-                            textureCount++;
-                            continue;
+                    AssetDatabase.StartAssetEditing(); // batch imports; Stop flushes them once
+                    try {
+                        BakeCacheContainer container = null;
+                        var inContainer = 0;
+                        foreach (var original in walk.ToClone) {
+                            var copy = map[original];
+                            // Texture2Ds get their own files (NDMF's pattern: big binary blobs
+                            // inside shared containers make every container reimport slow).
+                            if (copy is Texture2D) {
+                                AssetDatabase.CreateAsset(copy,
+                                    $"{folder}/tex-{textureCount:000}-{BakeFingerprint.SanitizeKey(copy.name)}.asset");
+                                textureCount++;
+                                continue;
+                            }
+                            if (container == null || inContainer >= MaxObjectsPerContainer) {
+                                container = ScriptableObject.CreateInstance<BakeCacheContainer>();
+                                container.name = $"container-{containerCount:000}";
+                                AssetDatabase.CreateAsset(container,
+                                    $"{folder}/container-{containerCount:000}.asset");
+                                containerCount++;
+                                inContainer = 0;
+                            }
+                            AssetDatabase.AddObjectToAsset(copy, container);
+                            inContainer++;
                         }
-                        if (container == null || inContainer >= MaxObjectsPerContainer) {
-                            container = ScriptableObject.CreateInstance<BakeCacheContainer>();
-                            container.name = $"container-{containerCount:000}";
-                            AssetDatabase.CreateAsset(container,
-                                $"{folder}/container-{containerCount:000}.asset");
-                            containerCount++;
-                            inContainer = 0;
-                        }
-                        AssetDatabase.AddObjectToAsset(copy, container);
-                        inContainer++;
+                    } finally {
+                        AssetDatabase.StopAssetEditing();
                     }
                     AssetDatabase.SaveAssets();
+                    Phase("persist");
 
                     var remapTargets = new List<Object>(components);
                     remapTargets.AddRange(map.Values);
-                    ObjectGraphCloner.Remap(remapTargets, map);
+                    ObjectGraphCloner.Remap(remapTargets, map, CanHoldReferences);
+                    Phase("remap");
 
                     var prefab = PrefabUtility.SaveAsPrefabAsset(
                         clone, folder + "/avatar.prefab", out var savedOk);
                     if (!savedOk || prefab == null) {
                         throw new InvalidOperationException("prefab save failed");
                     }
+                    Phase("prefab");
 
                     // Verification: every outgoing reference of every saved object must land
                     // on a persisted, non-transient asset (or inside the prefab itself) — a
@@ -253,7 +273,8 @@ namespace FuryPlusPlus {
                         if (component != null && !(component is Transform)) verifyRoots.Add(component);
                     }
                     verifyRoots.AddRange(map.Values);
-                    var leaks = ObjectGraphCloner.Walk(verifyRoots, VerifyClassify);
+                    var leaks = ObjectGraphCloner.Walk(verifyRoots, VerifyClassify, CanHoldReferences);
+                    Phase("verify");
                     if (leaks.HasRejections) {
                         AssetDatabase.DeleteAsset(folder);
                         Log.Warn("Bake cache: snapshot discarded — a transient reference " +
@@ -283,7 +304,8 @@ namespace FuryPlusPlus {
                     timer.Stop();
                     Log.Info($"Bake cache: captured snapshot for '{clone.name}' in " +
                              $"{timer.Elapsed.TotalSeconds:F1}s ({walk.ToClone.Count} transient " +
-                             $"objects, {containerCount} containers, {textureCount} textures).");
+                             $"objects, {containerCount} containers, {textureCount} textures; " +
+                             $"{phases.ToString().TrimEnd()}).");
                     return true;
                 } finally {
                     // Unpersisted leftovers (clones that never made it into an asset) would
@@ -340,6 +362,15 @@ namespace FuryPlusPlus {
 
         internal static bool IsTransientPath(string path) {
             return path.StartsWith("Packages/com.vrcfury.temp") || path.Contains("/__Generated/");
+        }
+
+        /**
+         * Meshes and textures hold no serialized object references, but SerializedObject
+         * iteration visits their bulk data (vertex bytes, pixels) property by property —
+         * skipping them cut the graph passes from ~16s to ~2s on the reference avatar.
+         */
+        private static bool CanHoldReferences(Object obj) {
+            return !(obj is Mesh || obj is Texture);
         }
 
         private static string AddonVersion {

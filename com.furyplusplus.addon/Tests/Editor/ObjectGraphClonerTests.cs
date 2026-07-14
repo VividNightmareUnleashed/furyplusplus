@@ -56,6 +56,22 @@ namespace FuryPlusPlus.Tests.Editor {
         }
 
         [Test]
+        public void WalkClassifiesButDoesNotTraverseOpaqueObjects() {
+            var a = Node("a");
+            var b = Node("b");
+            var c = Node("c");
+            a.direct = b;
+            b.direct = c;
+
+            var result = ObjectGraphCloner.Walk(new Object[] { a },
+                _ => ObjectGraphCloner.RefKind.Clone,
+                obj => obj != b); // b cannot hold interesting references (e.g. a Mesh)
+
+            Assert.That(result.ToClone, Is.EqualTo(new Object[] { b }),
+                "opaque objects still join the closure; their referents do not");
+        }
+
+        [Test]
         public void WalkTerminatesOnCycles() {
             var a = Node("a");
             var b = Node("b");
