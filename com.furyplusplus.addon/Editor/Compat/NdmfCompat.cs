@@ -24,6 +24,7 @@ namespace FuryPlusPlus {
         private static bool warned;
 
         private static Type tagType;
+        private static Type activatorType;
         private static FieldInfo processingCompleted;
         private static MethodInfo recordAvatar;
         private static FieldInfo ranEarlyHook;
@@ -34,6 +35,7 @@ namespace FuryPlusPlus {
             resolved = true;
 
             tagType = ReflectionUtils.FindType("nadena.dev.ndmf.runtime.AlreadyProcessedTag");
+            activatorType = ReflectionUtils.FindType("nadena.dev.ndmf.runtime.AvatarActivator");
             processingCompleted = tagType?.GetField("processingCompleted",
                 BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
 
@@ -46,6 +48,17 @@ namespace FuryPlusPlus {
                 BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
             ranEarlyHook = stateType?.GetField("ranEarlyHook", instanceAny);
             ranOptimization = stateType?.GetField("ranOptimization", instanceAny);
+        }
+
+        /**
+         * NDMF's per-avatar play-mode activation component. It self-destructs in its own
+         * Update, and NDMF's global activator may be INSIDE GetOrAddComponent for it when a
+         * replay fires (AddComponent → Awake → OnPreprocessAvatar → replay), so destroying it
+         * mid-restore null-refs NDMF — the restore must leave it alone.
+         */
+        internal static bool IsNdmfActivator(Component component) {
+            EnsureResolved();
+            return activatorType != null && activatorType.IsInstanceOfType(component);
         }
 
         /** The avatar carries a completed AlreadyProcessedTag. False when NDMF is absent. */

@@ -213,7 +213,11 @@ namespace FuryPlusPlus {
             GameObjectUtility.RemoveMonoBehavioursWithMissingScript(obj);
             var remaining = new List<Component>();
             foreach (var component in obj.GetComponents<Component>()) {
-                if (component != null && !(component is Transform)) remaining.Add(component);
+                if (component == null || component is Transform) continue;
+                // NDMF may be inside GetOrAddComponent for its activator right now (the
+                // replay fires from that component's Awake); it self-destructs on its own.
+                if (NdmfCompat.IsNdmfActivator(component)) continue;
+                remaining.Add(component);
             }
             for (var pass = 0; remaining.Count > 0 && pass < 16; pass++) {
                 var required = new HashSet<Type>();
