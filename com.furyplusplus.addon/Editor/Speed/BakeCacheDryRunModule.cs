@@ -16,9 +16,10 @@ namespace FuryPlusPlus {
      * ever replaying anything.
      *
      * The fingerprint's false-hit rate can only be judged across many real sessions,
-     * which is exactly what this module measures. The replay stage (instantiate the
-     * cached bake, skip the pipeline) lands only after the telemetry shows the
-     * fingerprint is trustworthy on the user's own avatars.
+     * which is exactly what this module measures. Stage 3 (BakeCacheReplayModule) shares
+     * this module's chain anchor: ChainPrefix hosts both the telemetry and the replay
+     * hand-off, so one fingerprint computation serves both and a replayed call can never
+     * pollute the telemetry records.
      *
      * Stage 2 (NDMF-aware anchor): the same fingerprint is additionally taken at
      * VRCBuildPipelineCallbacks.OnPreprocessAvatar — before the whole preprocessor chain
@@ -90,6 +91,16 @@ namespace FuryPlusPlus {
         private static int chainDepth;
         private static readonly HashSet<int> chainSeen = new HashSet<int>();
 
+        // Stage-3 replay/capture state for the current chain call (see BakeCacheReplayModule).
+        private static BakeFingerprint.Result chainFingerprint;
+        private static GameObject chainAvatar;
+        private static string snapshotKey;
+        private static bool chainTelemetry;
+        private static bool chainCapture;
+        private static bool chainSnapshotValid;
+        private static bool replayedThisCall;
+        private static readonly HashSet<string> ineligibleLogged = new HashSet<string>();
+
         private static string DirPath => BakeFingerprint.DirPath;
 
         private static Type vrcfuryTestType;
@@ -142,6 +153,7 @@ namespace FuryPlusPlus {
         private static void OnPlayModeStateChanged(PlayModeStateChange state) {
             if (state == PlayModeStateChange.ExitingPlayMode || state == PlayModeStateChange.EnteredEditMode) {
                 chainSeen.Clear();
+                ineligibleLogged.Clear();
                 chainDepth = 0;
             }
         }
@@ -258,15 +270,27 @@ namespace FuryPlusPlus {
 
         // ---- stage 2: whole-chain anchor (pre-NDMF) ----
 
-        private static void ChainPrefix(GameObject __0) {
+        private static bool ChainPrefix(GameObject __0, ref bool __result) {
             // Only the outermost call is "the chain"; nothing in the chain is known to
             // recurse into OnPreprocessAvatar, but the guard costs nothing.
-            if (chainDepth++ != 0) return;
+            if (chainDepth++ != 0) return true;
             chainKey = null;
             chainRecord = null;
             chainTimer = null;
-            if (BakeCacheDryRunModule.Instance?.Enabled != true) return;
-            if (!Application.isPlaying) return;
+            chainFingerprint = null;
+            chainAvatar = null;
+            snapshotKey = null;
+            chainTelemetry = false;
+            chainCapture = false;
+            chainSnapshotValid = false;
+            replayedThisCall = false;
+
+            var dryRunOn = BakeCacheDryRunModule.Instance?.Enabled == true;
+            var replayModule = BakeCacheReplayModule.Instance;
+            var replayOn = replayModule != null && ModuleRegistry.IsActive(replayModule)
+                           && replayModule.Enabled;
+            if (!dryRunOn && !replayOn) return true;
+            if (!Application.isPlaying) return true;
 
             try {
                 bool uploading;
@@ -275,104 +299,184 @@ namespace FuryPlusPlus {
                 } catch {
                     uploading = true;
                 }
-                if (uploading) return;
+                if (uploading) return true;
 
                 var avatarObject = __0;
-                if (avatarObject == null) return;
+                if (avatarObject == null) return true;
                 // Post-processed rerun (VRCFury tags processed play-mode avatars).
-                if (avatarObject.GetComponent(vrcfuryTestType) != null) return;
+                if (avatarObject.GetComponent(vrcfuryTestType) != null) return true;
+                // A replayed avatar carries NDMF's completed tag; unlike the static sets
+                // below it survives everything short of a domain reload, and a normally
+                // baked avatar with the tag is deduped by VRCFury exactly as stock.
+                if (NdmfCompat.IsMarkedProcessed(avatarObject)) return true;
                 // NDMF (HookDedup) and VRCFury (RunPreprocessorsOnlyOncePatch) both dedup
                 // repeat chain invocations per play session; mirror that so a suppressed
                 // second call can never overwrite the pre-chain fingerprint.
-                if (!chainSeen.Add(avatarObject.GetInstanceID())) return;
+                if (!chainSeen.Add(avatarObject.GetInstanceID())) return true;
 
                 var hashTimer = System.Diagnostics.Stopwatch.StartNew();
-                var record = ToRecord(BakeFingerprint.Compute(avatarObject, "chain-"));
+                var fingerprint = BakeFingerprint.Compute(avatarObject, "chain-");
+                var record = ToRecord(fingerprint);
                 hashTimer.Stop();
 
                 var avatarName = avatarObject.name.Replace("(Clone)", "").Trim();
-                chainKey = BakeFingerprint.SanitizeKey(avatarObject.scene.name + "__" + avatarName) + ".chain";
+                var key = BakeFingerprint.SanitizeKey(avatarObject.scene.name + "__" + avatarName);
+                chainKey = key + ".chain";
                 chainRecord = record;
+                chainFingerprint = fingerprint;
+                chainAvatar = avatarObject;
+                snapshotKey = key;
+                chainTelemetry = dryRunOn;
+                chainCapture = replayOn;
 
-                CacheRecord previous = null;
-                var file = Path.Combine(DirPath, chainKey + ".json");
-                if (File.Exists(file)) {
-                    try {
-                        previous = JsonUtility.FromJson<CacheRecord>(File.ReadAllText(file));
-                    } catch {
-                        previous = null;
+                if (dryRunOn) {
+                    CacheRecord previous = null;
+                    var file = Path.Combine(DirPath, chainKey + ".json");
+                    if (File.Exists(file)) {
+                        try {
+                            previous = JsonUtility.FromJson<CacheRecord>(File.ReadAllText(file));
+                        } catch {
+                            previous = null;
+                        }
+                    }
+
+                    // Pre-chain, the avatar must not reference per-bake generated containers.
+                    // If it does, an earlier bake leaked state into the scene and a chain-level
+                    // cache could never be trusted for this avatar — surface it loudly.
+                    var note = record.upstreamGenerated
+                        ? " WARNING: avatar references NDMF/MA-generated assets BEFORE the build chain ran (leaked state)."
+                        : "";
+                    if (previous == null) {
+                        record.wouldMiss = 1;
+                        Log.Info($"Bake cache (dry run, whole-chain anchor): first bake recorded for " +
+                                 $"'{avatarObject.name}' (fingerprint took {hashTimer.ElapsedMilliseconds} ms).{note}");
+                    } else {
+                        record.wouldHit = previous.wouldHit;
+                        record.wouldMiss = previous.wouldMiss;
+                        string missReason = null;
+                        if (previous.hierarchyHash != record.hierarchyHash) missReason = "avatar hierarchy/components changed";
+                        else if (previous.assetsHash != record.assetsHash) missReason = "a referenced asset changed";
+                        else if (previous.configHash != record.configHash) missReason = "build/addon/plugin configuration changed";
+                        else if (previous.generatedHash != record.generatedHash) missReason =
+                            "pre-chain generated-asset references changed (leaked state from an earlier bake)";
+
+                        if (missReason == null) {
+                            record.wouldHit++;
+                            Log.Info($"Bake cache (dry run, whole-chain anchor): would have HIT for " +
+                                     $"'{avatarObject.name}' — saving ~{previous.lastBakeSeconds:F1}s of the full " +
+                                     $"NDMF+VRCFury chain (fingerprint took {hashTimer.ElapsedMilliseconds} ms; " +
+                                     $"tally {record.wouldHit} hit / {record.wouldMiss} miss).{note}");
+                        } else {
+                            record.wouldMiss++;
+                            Log.Info($"Bake cache (dry run, whole-chain anchor): would MISS for " +
+                                     $"'{avatarObject.name}' — {missReason} " +
+                                     $"(fingerprint took {hashTimer.ElapsedMilliseconds} ms; " +
+                                     $"tally {record.wouldHit} hit / {record.wouldMiss} miss).{note}");
+                        }
+                        LastChainStats = $"chain: wouldHit={record.wouldHit} wouldMiss={record.wouldMiss}";
                     }
                 }
 
-                // Pre-chain, the avatar must not reference per-bake generated containers.
-                // If it does, an earlier bake leaked state into the scene and a chain-level
-                // cache could never be trusted for this avatar — surface it loudly.
-                var note = record.upstreamGenerated
-                    ? " WARNING: avatar references NDMF/MA-generated assets BEFORE the build chain ran (leaked state)."
-                    : "";
-                if (previous == null) {
-                    record.wouldMiss = 1;
-                    Log.Info($"Bake cache (dry run, whole-chain anchor): first bake recorded for " +
-                             $"'{avatarObject.name}' (fingerprint took {hashTimer.ElapsedMilliseconds} ms).{note}");
-                } else {
-                    record.wouldHit = previous.wouldHit;
-                    record.wouldMiss = previous.wouldMiss;
-                    string missReason = null;
-                    if (previous.hierarchyHash != record.hierarchyHash) missReason = "avatar hierarchy/components changed";
-                    else if (previous.assetsHash != record.assetsHash) missReason = "a referenced asset changed";
-                    else if (previous.configHash != record.configHash) missReason = "build/addon/plugin configuration changed";
-                    else if (previous.generatedHash != record.generatedHash) missReason =
-                        "pre-chain generated-asset references changed (leaked state from an earlier bake)";
-
-                    if (missReason == null) {
-                        record.wouldHit++;
-                        Log.Info($"Bake cache (dry run, whole-chain anchor): would have HIT for " +
-                                 $"'{avatarObject.name}' — saving ~{previous.lastBakeSeconds:F1}s of the full " +
-                                 $"NDMF+VRCFury chain (fingerprint took {hashTimer.ElapsedMilliseconds} ms; " +
-                                 $"tally {record.wouldHit} hit / {record.wouldMiss} miss).{note}");
-                    } else {
-                        record.wouldMiss++;
-                        Log.Info($"Bake cache (dry run, whole-chain anchor): would MISS for " +
-                                 $"'{avatarObject.name}' — {missReason} " +
-                                 $"(fingerprint took {hashTimer.ElapsedMilliseconds} ms; " +
-                                 $"tally {record.wouldHit} hit / {record.wouldMiss} miss).{note}");
+                if (replayOn) {
+                    if (!fingerprint.ReplayEligible) {
+                        if (ineligibleLogged.Add(key)) {
+                            var reason = fingerprint.ExternalSceneRefs.Count > 0
+                                ? "it references scene objects outside the avatar ("
+                                  + string.Join(", ", fingerprint.ExternalSceneRefs.GetRange(
+                                      0, Math.Min(3, fingerprint.ExternalSceneRefs.Count))) + ")"
+                                : "it references NDMF/MA-generated assets before the chain ran (leaked state)";
+                            Log.Info($"Bake cache: '{avatarObject.name}' cannot be replay-cached — {reason}.");
+                        }
+                    } else if (BakeCacheSnapshotStore.TryLoad(key, fingerprint, out var snapshot)) {
+                        if (Settings.IsOptionEnabled(replayModule, BakeCacheReplayModule.CaptureOnly)) {
+                            chainSnapshotValid = true; // still fresh; skip the re-capture
+                            Log.Info($"Bake cache: would have REPLAYED '{avatarObject.name}' " +
+                                     $"(~{snapshot.Meta.chainSeconds:F1}s) — capture-only validation " +
+                                     "mode, chain runs normally.");
+                        } else if (BakeCacheReplayPatch.TryReplay(avatarObject, snapshot)) {
+                            replayedThisCall = true;
+                            __result = true;
+                            return false; // skip the entire preprocessor chain
+                        }
+                        // TryReplay pre-destructive failure: snapshot is suspect, fall
+                        // through to a normal bake and let the finalizer re-capture.
                     }
-                    LastChainStats = $"chain: wouldHit={record.wouldHit} wouldMiss={record.wouldMiss}";
                 }
 
                 chainTimer = System.Diagnostics.Stopwatch.StartNew();
+                return true;
             } catch (Exception e) {
                 Log.Warn("Bake cache chain telemetry skipped: " + e.Message);
                 chainKey = null;
                 chainRecord = null;
+                chainFingerprint = null;
+                chainAvatar = null;
+                snapshotKey = null;
+                return true;
             }
         }
 
         private static Exception ChainFinalizer(Exception __exception, bool __result) {
             if (chainDepth > 0) chainDepth--;
             if (chainDepth != 0) return __exception;
-            if (chainKey != null && chainRecord != null) {
-                try {
-                    if (chainTimer != null) {
-                        chainTimer.Stop();
-                        chainRecord.lastBakeSeconds = chainTimer.Elapsed.TotalSeconds;
-                    }
-                    // Persist only successful chains (no exception AND every callback
-                    // returned true) as cache candidates.
-                    if (__exception == null && __result) {
+            try {
+                // A ~0.1s replay must never masquerade as a bake: no record, no capture.
+                if (replayedThisCall) return __exception;
+                if (chainKey == null || chainRecord == null) return __exception;
+                if (chainTimer != null) {
+                    chainTimer.Stop();
+                    chainRecord.lastBakeSeconds = chainTimer.Elapsed.TotalSeconds;
+                }
+                // Only successful chains (no exception AND every callback returned true)
+                // are cache candidates — for the record and the snapshot alike.
+                if (__exception != null || !__result) return __exception;
+
+                if (chainTelemetry) {
+                    try {
                         Directory.CreateDirectory(DirPath);
                         File.WriteAllText(
                             Path.Combine(DirPath, chainKey + ".json"),
                             JsonUtility.ToJson(chainRecord, true));
+                    } catch (Exception e) {
+                        Log.Warn("Bake cache chain telemetry could not persist: " + e.Message);
                     }
-                } catch (Exception e) {
-                    Log.Warn("Bake cache chain telemetry could not persist: " + e.Message);
                 }
+
+                if (chainCapture && !chainSnapshotValid && chainAvatar != null
+                    && chainFingerprint != null && chainFingerprint.ReplayEligible) {
+                    try {
+                        BakeCacheSnapshotStore.Capture(
+                            chainAvatar, snapshotKey, chainFingerprint, chainRecord.lastBakeSeconds);
+                    } catch (Exception e) {
+                        Log.Warn("Bake cache: snapshot capture failed (bake unaffected): " + e.Message);
+                    }
+                }
+
+                // Parity diagnostic: dump the processed hierarchy after a REAL bake so it can
+                // be diffed against the post-replay dump (see BakeCacheReplayPatch).
+                if (chainAvatar != null
+                    && EditorPrefs.GetBool(Settings.KeyPrefix + "bakeCache.parityDump", false)) {
+                    try {
+                        Directory.CreateDirectory(DirPath);
+                        File.WriteAllText(Path.Combine(DirPath, "parity-fresh.txt"),
+                            BakeFingerprint.DumpHierarchy(chainAvatar));
+                    } catch {
+                        // diagnostics only
+                    }
+                }
+                return __exception;
+            } finally {
+                chainKey = null;
+                chainRecord = null;
+                chainTimer = null;
+                chainFingerprint = null;
+                chainAvatar = null;
+                snapshotKey = null;
+                chainTelemetry = false;
+                chainCapture = false;
+                chainSnapshotValid = false;
+                replayedThisCall = false;
             }
-            chainKey = null;
-            chainRecord = null;
-            chainTimer = null;
-            return __exception;
         }
 
         /** Fingerprint → persisted record; hit/miss tallies and timing are filled in later. */

@@ -69,9 +69,11 @@ namespace FuryPlusPlus {
             new CompressorSolverModule(),
             new CompressorEligibilityModule(),
             new CompressorSub8Module(),
-            // --- Experimental play-mode iteration; both default OFF ---
+            // --- Experimental play-mode iteration; all default OFF ---
             new PlayModeNoDiskSaveModule(),
             new BakeCacheDryRunModule(),
+            // Replay shares the dry-run module's chain anchor; must install after it.
+            new BakeCacheReplayModule(),
             // --- UI: keeps the liquid progress bar animating inside long phases ---
             new ProgressPumpModule(),
         };

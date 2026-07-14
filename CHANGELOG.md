@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **Bake cache replay (experimental, default off):** on a whole-chain fingerprint HIT the entire
+  NDMF+VRCFury preprocessor chain is skipped and the avatar is restored in place from a cached
+  snapshot of the previous processed result — repeat play-mode bakes become near-instant.
+  Snapshots (processed-avatar prefab + deep copies of every transient dependency) live in
+  `Packages/com.furyplusplus.bakecache`, are replaced atomically after each successful bake, and
+  are validated against the sidecar's fingerprint hashes before every replay. Play-mode only;
+  uploads are never cached. Ships with a "capture snapshots but never replay" validation option
+  and a Clear-bake-cache button. Known limits: avatars referencing scene objects outside their own
+  hierarchy are not cached; AudioLink's play-mode refresh is skipped on replayed bakes.
+- Bake-cache config hash now includes per-module sub-option states (`DescribeStates`), so flipping
+  a sub-toggle invalidates the cache. One-time effect: all fingerprint records from earlier builds
+  log a config-hash MISS on their first bake after upgrading.
+
 ## 0.1.0 — 2026-07-13
 
 Initial release: full speed parity. FuryPlusPlus supersedes QuickFury with a fresh module

@@ -57,7 +57,7 @@ namespace FuryPlusPlus {
                         "blendshapeBakeRewrite",
                     }),
                     ("SPS", new[] { "spsCoveredRenderer", "spsMaterialProbeCache" }),
-                    ("Play-mode iteration", new[] { "playModeSkips", "playModeNoDiskSave", "bakeCacheDryRun" }),
+                    ("Play-mode iteration", new[] { "playModeSkips", "playModeNoDiskSave", "bakeCacheDryRun", "bakeCacheReplay" }),
                 },
             },
             new TabDef {
@@ -777,6 +777,20 @@ namespace FuryPlusPlus {
                     }
                 }
             }
+
+            if (module.Id == "bakeCacheReplay" && installed) {
+                using (new EditorGUILayout.HorizontalScope()) {
+                    GUILayout.Space(18f);
+                    if (GUILayout.Button(
+                            new GUIContent("Clear bake cache",
+                                "Deletes every cached snapshot and fingerprint record; the next " +
+                                "play-mode bake starts from scratch."),
+                            GUILayout.Width(130f))) {
+                        BakeCacheSnapshotStore.ClearAll();
+                    }
+                    GUILayout.FlexibleSpace();
+                }
+            }
         }
 
         private void DrawDiagnostics() {
@@ -953,6 +967,15 @@ namespace FuryPlusPlus {
                         return hits >= 0 && misses >= 0 && hits + misses > 0
                             ? MakeChip($"would hit {hits}/{hits + misses} bakes",
                                 "How often an incremental bake cache could have skipped the bake.")
+                            : null;
+                    }
+                case "bakeCacheReplay": {
+                        var stats = module.ReportStats();
+                        if (string.IsNullOrEmpty(stats)) return null;
+                        var match = Regex.Match(stats, @"replays=(\d+) savedSeconds=([\d.]+)");
+                        return match.Success && int.Parse(match.Groups[1].Value) > 0
+                            ? MakeChip($"replayed {match.Groups[1].Value} bakes (~{match.Groups[2].Value}s saved)",
+                                "Play-mode bakes skipped by restoring the cached processed avatar.")
                             : null;
                     }
                 case "behaviourContainerFilter": {
