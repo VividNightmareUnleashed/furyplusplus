@@ -2,7 +2,7 @@
 
 FuryPlusPlus is an Editor-only, bolt-on layer for an existing VRCFury installation, covering both
 **bake speed** and (in upcoming releases) **output quality** — fewer animator layers, fewer synced
-parameter bits, less VRAM. It profiles VRCFury's bake and replaces measured hot paths with indexed
+parameter bits. It profiles VRCFury's bake and replaces measured hot paths with indexed
 implementations. It does not ship, fork, or modify VRCFury.
 
 FuryPlusPlus is the successor to **QuickFury** and includes ports of all 21 of its validated speed

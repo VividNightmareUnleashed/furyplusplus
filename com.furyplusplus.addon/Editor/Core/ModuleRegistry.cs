@@ -62,7 +62,6 @@ namespace FuryPlusPlus {
             new ToggleSeparateLocalModule(),
             new ToggleFadeModule(),
             new DbtConsolidationModule(),
-            new BlendshapeAutoEnableModule(),
             new NarrowIntParamsModule(),
             // --- Compressor family; first Install wins the shared scope patch ---
             new CompressorLanePackingModule(),

@@ -62,7 +62,7 @@ namespace FuryPlusPlus {
             },
             new TabDef {
                 Kind = ModuleKind.Quality, Title = "Quality",
-                Note = "Changes the bake output: fewer animator layers, fewer sync bits, less VRAM.",
+                Note = "Changes the bake output: fewer animator layers, fewer sync bits.",
                 Groups = new[] {
                     ("Animator layers", new[] {
                         "fullScopeDbt", "offSideElimination", "toggleSeparateLocal", "toggleFadeTrees",
@@ -72,7 +72,6 @@ namespace FuryPlusPlus {
                     ("Parameter compressor (sync bits)", new[] {
                         "compressorLanePacking", "compressorSolver", "compressorEligibility", "compressorSub8",
                     }),
-                    ("VRAM", new[] { "blendshapeAutoEnable" }),
                 },
             },
             new TabDef {
@@ -276,11 +275,10 @@ namespace FuryPlusPlus {
             }
             EditorGUILayout.Space(2);
 
-            var cardWidth = Mathf.Max(106f, (position.width - 42f) / 4f);
+            var cardWidth = Mathf.Max(106f, (position.width - 42f) / 3f);
             using (new EditorGUILayout.HorizontalScope()) {
                 DrawSyncCard(cardWidth);
                 DrawFxLayersCard(cardWidth);
-                DrawVramCard(cardWidth);
                 DrawLastBakeCard(cardWidth);
             }
 
@@ -360,29 +358,6 @@ namespace FuryPlusPlus {
                         "(Quality tab); the exact merge count is measured per bake."), miniWrapStyle);
                 } else if (a == null) {
                     GUILayout.Label("press Analyze", miniWrapStyle);
-                }
-                GUILayout.FlexibleSpace();
-            }
-        }
-
-        private void DrawVramCard(float width) {
-            using (Card(width)) {
-                GUILayout.Label("VRAM", EditorStyles.miniLabel);
-                var a = analysis;
-                if (a?.BlendshapeVramBytes > 0) {
-                    GUILayout.Label(new GUIContent("-" + Vram(a.Value.BlendshapeVramBytes),
-                        "Freed by baking non-animated blendshapes (Quality tab). Approximate — assumes " +
-                        "Unity's sparse GPU blendshape layout (40 B per affected vertex per frame); " +
-                        "shapes the optimizer protects (e.g. MMD) may be kept."), valueGreenStyle);
-                    GUILayout.Label(
-                        $"{N(a.Value.NonAnimatedBlendshapes)} idle blendshapes · " +
-                        $"{a.Value.BlendshapeMeshes} mesh(es)", miniWrapStyle);
-                } else if (a?.NonAnimatedBlendshapes > 0) {
-                    GUILayout.Label(N(a.Value.NonAnimatedBlendshapes), valueStyle);
-                    GUILayout.Label("idle blendshapes bakeable", miniWrapStyle);
-                } else {
-                    GUILayout.Label("—", valueStyle);
-                    GUILayout.Label(a == null ? "press Analyze" : "nothing to bake", miniWrapStyle);
                 }
                 GUILayout.FlexibleSpace();
             }
@@ -835,12 +810,6 @@ namespace FuryPlusPlus {
             return value.ToString("N0", CultureInfo.InvariantCulture);
         }
 
-        private static string Vram(long bytes) {
-            return bytes >= 1024 * 1024
-                ? (bytes / (1024f * 1024f)).ToString("0.#", CultureInfo.InvariantCulture) + " MB"
-                : (bytes / 1024f).ToString("0.#", CultureInfo.InvariantCulture) + " KB";
-        }
-
         /** First capture of `pattern` in the module's last-bake stats, or -1. */
         private static int Stat(Module module, string pattern) {
             var stats = module.ReportStats();
@@ -885,20 +854,6 @@ namespace FuryPlusPlus {
                 case "dbtConsolidation": {
                         var merged = Stat(module, @"mergedLayers=(\d+)");
                         return merged > 0 ? MakeChip($"-{merged} layers last bake", module.ReportStats()) : null;
-                    }
-                case "blendshapeAutoEnable": {
-                        if (a?.BlendshapeVramBytes > 0) {
-                            return MakeChip($"-{Vram(a.Value.BlendshapeVramBytes)} VRAM",
-                                $"{N(a.Value.NonAnimatedBlendshapes)} non-animated blendshapes across " +
-                                $"{a.Value.BlendshapeMeshes} mesh(es). Approximate — assumes Unity's sparse GPU " +
-                                "blendshape layout (40 B per affected vertex per frame); shapes the optimizer " +
-                                "protects (e.g. MMD) may be kept.");
-                        }
-                        return a?.NonAnimatedBlendshapes > 0
-                            ? MakeChip($"{N(a.Value.NonAnimatedBlendshapes)} blendshapes bakeable",
-                                $"Non-animated blendshapes across {a.Value.BlendshapeMeshes} mesh(es); " +
-                                "baking them frees VRAM (exact amount depends on affected vertices).")
-                            : null;
                     }
                 case "noOpCurveStrip": {
                         var curves = Stat(module, @"curves=(\d+)");
