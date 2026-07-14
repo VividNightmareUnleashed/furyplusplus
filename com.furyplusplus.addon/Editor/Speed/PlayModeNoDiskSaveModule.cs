@@ -28,7 +28,7 @@ namespace FuryPlusPlus {
         }
 
         internal override string Id => "playModeNoDiskSave";
-        internal override string DisplayName => "Play mode: skip disk serialization (experimental)";
+        internal override string DisplayName => "Play mode: skip disk serialization (⚗️EXPERIMENTAL)";
         internal override ModuleKind Kind => ModuleKind.Speed;
         internal override CompatTier RequiredTier => CompatTier.ExactVersion;
         internal override bool DefaultEnabled => false;

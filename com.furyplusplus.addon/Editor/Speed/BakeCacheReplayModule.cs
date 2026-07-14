@@ -37,7 +37,7 @@ namespace FuryPlusPlus {
         }
 
         internal override string Id => "bakeCacheReplay";
-        internal override string DisplayName => "Bake cache replay (experimental)";
+        internal override string DisplayName => "Bake cache replay (⚗️EXPERIMENTAL)";
         internal override ModuleKind Kind => ModuleKind.Speed;
         internal override CompatTier RequiredTier => CompatTier.ExactVersion;
         internal override bool DefaultEnabled => false;

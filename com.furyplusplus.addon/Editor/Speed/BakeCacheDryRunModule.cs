@@ -38,7 +38,7 @@ namespace FuryPlusPlus {
         }
 
         internal override string Id => "bakeCacheDryRun";
-        internal override string DisplayName => "Bake cache telemetry (dry run, experimental)";
+        internal override string DisplayName => "Bake cache dry-run telemetry (⚗️EXPERIMENTAL)";
         internal override ModuleKind Kind => ModuleKind.Speed;
         internal override CompatTier RequiredTier => CompatTier.ExactVersion;
         internal override bool DefaultEnabled => false;
