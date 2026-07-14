@@ -188,7 +188,9 @@ namespace FuryPlusPlus {
                 var cloneRoot = clone.transform;
                 var components = new List<Object>();
                 foreach (var component in clone.GetComponentsInChildren<Component>(true)) {
-                    if (component != null) components.Add(component);
+                    // Transforms serialize only parent/children/GO — and the clone root's
+                    // m_Father is the capture holder, which must not look like an external ref.
+                    if (component != null && !(component is Transform)) components.Add(component);
                 }
                 var walk = ObjectGraphCloner.Walk(components, obj => Classify(obj, cloneRoot));
                 if (walk.HasRejections) {
@@ -247,7 +249,7 @@ namespace FuryPlusPlus {
                     // missed transient would silently break the replayed avatar next session.
                     var verifyRoots = new List<Object>();
                     foreach (var component in prefab.GetComponentsInChildren<Component>(true)) {
-                        if (component != null) verifyRoots.Add(component);
+                        if (component != null && !(component is Transform)) verifyRoots.Add(component);
                     }
                     verifyRoots.AddRange(map.Values);
                     var leaks = ObjectGraphCloner.Walk(verifyRoots, VerifyClassify);

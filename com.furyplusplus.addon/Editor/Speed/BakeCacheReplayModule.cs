@@ -150,9 +150,11 @@ namespace FuryPlusPlus {
 
                 // Children and pasted components may still reference the shell root or its
                 // components; remap every component under obj onto the restored equivalents.
+                // Transforms are excluded: SetParent already rewired their parent/children
+                // pointers, and writing those through SerializedObject would corrupt them.
                 var targets = new List<Object>();
                 foreach (var component in obj.GetComponentsInChildren<Component>(true)) {
-                    if (component != null) targets.Add(component);
+                    if (component != null && !(component is Transform)) targets.Add(component);
                 }
                 ObjectGraphCloner.Remap(targets, map);
 
