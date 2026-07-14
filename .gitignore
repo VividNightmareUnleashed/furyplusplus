@@ -4,6 +4,7 @@
 
 # Built packages are published as releases, not committed.
 *.unitypackage
+*.zip
 
 # IDE / OS
 .vs/
