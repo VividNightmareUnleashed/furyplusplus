@@ -90,7 +90,10 @@ namespace FuryPlusPlus {
             var timer = System.Diagnostics.Stopwatch.StartNew();
             GameObject holder = null;
             var destructive = false;
+            var keepBar = false;
             try {
+                BakeCacheSnapshotStore.Progress(
+                    $"Loading cached bake for '{obj.name}'…", 0.15f);
                 // Validate and materialize everything BEFORE touching obj.
                 holder = new GameObject("FuryPlusPlus BakeCache Replay") {
                     hideFlags = HideFlags.HideAndDontSave
@@ -106,6 +109,7 @@ namespace FuryPlusPlus {
                 var shellLayer = shell.layer;
                 var shellTag = shell.tag;
 
+                BakeCacheSnapshotStore.Progress("Restoring avatar from cache…", 0.55f);
                 // ---- first destructive op; failures below are torn-avatar territory ----
                 destructive = true;
                 obj.SetActive(false); // no Awake/OnEnable until references are consistent again
@@ -174,6 +178,10 @@ namespace FuryPlusPlus {
                 savedSeconds += snapshot.Meta.chainSeconds;
                 Log.Info($"Bake cache: REPLAYED '{obj.name}' in {timer.Elapsed.TotalSeconds:F2}s " +
                          $"(skipped ~{snapshot.Meta.chainSeconds:F1}s bake).");
+                // Leave the bar covering the rest of the silent play transition (scene and
+                // avatar startup); the play-mode-change hook clears it once play begins.
+                BakeCacheSnapshotStore.Progress("Cache restored — starting play mode…", 0.95f);
+                keepBar = true;
 
                 if (EditorPrefs.GetBool(Settings.KeyPrefix + "bakeCache.parityDump", false)) {
                     try {
@@ -202,6 +210,8 @@ namespace FuryPlusPlus {
                 }
                 if (holder != null) Object.DestroyImmediate(holder);
                 return true; // running the chain over a half-restored avatar is worse
+            } finally {
+                if (!keepBar) EditorUtility.ClearProgressBar();
             }
         }
 

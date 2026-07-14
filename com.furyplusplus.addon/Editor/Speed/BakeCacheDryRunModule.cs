@@ -156,6 +156,10 @@ namespace FuryPlusPlus {
                 ineligibleLogged.Clear();
                 chainDepth = 0;
             }
+            // The replay leaves its progress bar up through the silent play transition.
+            if (state == PlayModeStateChange.EnteredPlayMode || state == PlayModeStateChange.EnteredEditMode) {
+                EditorUtility.ClearProgressBar();
+            }
         }
 
         private static void ProcessPrefix(object __0) {

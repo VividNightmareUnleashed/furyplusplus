@@ -185,6 +185,7 @@ namespace FuryPlusPlus {
             var folder = SnapshotFolder(key);
             GameObject holder = null;
             try {
+                Progress("Cloning the processed avatar…", 0.05f);
                 holder = new GameObject("FuryPlusPlus BakeCache Capture") {
                     hideFlags = HideFlags.HideAndDontSave
                 };
@@ -194,6 +195,7 @@ namespace FuryPlusPlus {
                 StripDontSaveComponents(clone);
                 ClearHideFlags(clone);
                 Phase("clone");
+                Progress("Collecting transient bake outputs…", 0.15f);
 
                 var cloneRoot = clone.transform;
                 var components = new List<Object>();
@@ -211,8 +213,10 @@ namespace FuryPlusPlus {
                     return false;
                 }
 
+                Progress($"Copying {walk.ToClone.Count} bake outputs…", 0.3f);
                 var map = ObjectGraphCloner.CloneAll(walk.ToClone);
                 Phase("copy");
+                Progress("Writing snapshot assets…", 0.45f);
                 try {
                     AssetDatabase.DeleteAsset(folder);
                     if (!AssetDatabase.IsValidFolder(SnapshotsFolder)) {
@@ -252,18 +256,21 @@ namespace FuryPlusPlus {
                     }
                     AssetDatabase.SaveAssets();
                     Phase("persist");
+                    Progress("Rewiring references onto the snapshot…", 0.65f);
 
                     var remapTargets = new List<Object>(components);
                     remapTargets.AddRange(map.Values);
                     ObjectGraphCloner.Remap(remapTargets, map, CanHoldReferences);
                     Phase("remap");
 
+                    Progress("Saving the avatar prefab…", 0.8f);
                     var prefab = PrefabUtility.SaveAsPrefabAsset(
                         clone, folder + "/avatar.prefab", out var savedOk);
                     if (!savedOk || prefab == null) {
                         throw new InvalidOperationException("prefab save failed");
                     }
                     Phase("prefab");
+                    Progress("Verifying the snapshot…", 0.92f);
 
                     // Verification: every outgoing reference of every saved object must land
                     // on a persisted, non-transient asset (or inside the prefab itself) — a
@@ -326,7 +333,13 @@ namespace FuryPlusPlus {
                 return false;
             } finally {
                 if (holder != null) Object.DestroyImmediate(holder);
+                EditorUtility.ClearProgressBar();
             }
+        }
+
+        /** Native modal bar — the only UI that reliably renders inside a blocking editor op. */
+        internal static void Progress(string label, float fraction) {
+            EditorUtility.DisplayProgressBar("FuryPlusPlus Bake Cache", label, fraction);
         }
 
         internal static void DeleteSnapshot(Snapshot snapshot) {
