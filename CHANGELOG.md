@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.2 — 2026-07-15
+
+Tracks VRCFury 1.1367. VRCFury 1.1366 and 1.1367 were haptics and in-editor rendering fixes — an
+OGB fix for avatars with unusual root scales, and a reworked scene-view SPS greenscreen fix — none
+of which touch the build-speed or bake-output paths FuryPlusPlus optimizes. This is a pin bump
+only: no module changes, and baked output is unchanged.
+
+- **VRCFury pin → 1.1367.0:** the exact `com.vrcfury.vrcfury` pin moves from 1.1365.0 to 1.1367.0,
+  so the Creator Companion installs and keeps this version. From-disk installs still load any
+  version and fail closed as before.
+
 ## 1.1.1 — 2026-07-15
 
 Log-cosmetic fix, no behavior or bake-output change from 1.1.0. The bootstrap console line

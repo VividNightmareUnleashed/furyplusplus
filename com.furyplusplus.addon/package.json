@@ -1,7 +1,7 @@
 {
   "name": "com.furyplusplus.addon",
   "displayName": "FuryPlusPlus",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "unity": "2022.3",
   "description": "Your beloved VRCFury play mode / upload bake process, up to 7x faster. Plus other optimisations.",
   "license": "SEE LICENSE IN LICENSE.md",
@@ -10,7 +10,7 @@
     "url": "https://github.com/VividNightmareUnleashed"
   },
   "vpmDependencies": {
-    "com.vrcfury.vrcfury": "1.1365.0",
+    "com.vrcfury.vrcfury": "1.1367.0",
     "com.vrchat.avatars": ">=3.10.3"
   }
 }
