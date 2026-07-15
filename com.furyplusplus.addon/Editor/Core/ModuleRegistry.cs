@@ -12,7 +12,9 @@ namespace FuryPlusPlus {
         /** VRCFury version/tier requirement not met; module never attempted. */
         DisabledIncompatible,
         /** Install() threw; module is off for this domain load. */
-        Failed
+        Failed,
+        /** VRCFury now does this natively (benchmarked equal-or-better); patch code removed. */
+        Superseded
     }
 
     internal static class ModuleRegistry {
@@ -86,6 +88,11 @@ namespace FuryPlusPlus {
             Statuses.Clear();
             var installed = 0;
             foreach (var module in All) {
+                if (module.Superseded is NativeEquivalent superseded) {
+                    Set(module, ModuleState.Superseded,
+                        $"VRCFury integrated this in {superseded.Version}");
+                    continue;
+                }
                 if (!compat.Satisfies(module.RequiredTier)) {
                     Set(module, ModuleState.DisabledIncompatible,
                         $"requires {module.RequiredTier} (VRCFury {compat.PackageVersion}, tested {VrcfuryCompat.PinnedVersion})");

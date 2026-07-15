@@ -729,6 +729,11 @@ namespace FuryPlusPlus {
         }
 
         private void DrawModule(Module module) {
+            if (module.Superseded is NativeEquivalent superseded) {
+                DrawSupersededModule(module, superseded);
+                return;
+            }
+
             var status = ModuleRegistry.GetStatus(module);
             var installed = status.State == ModuleState.Installed;
 
@@ -739,6 +744,9 @@ namespace FuryPlusPlus {
                     var enabled = EditorPrefs.GetBool(Settings.ModuleKey(module), module.DefaultEnabled);
                     var toggled = EditorGUILayout.ToggleLeft(content, enabled, GUILayout.Width(width));
                     if (toggled != enabled) Settings.SetModuleEnabled(module, toggled);
+                }
+                if (installed && module.OverridesNative is NativeEquivalent overrides) {
+                    DrawOverrideBadge(overrides);
                 }
                 GUILayout.FlexibleSpace();
                 if (!installed) {
@@ -778,6 +786,50 @@ namespace FuryPlusPlus {
             }
 
             if (installed) module.DrawExtraSettings();
+        }
+
+        /**
+         * A module VRCFury now does natively: the real toggle box, greyed and disabled, with
+         * its name struck through, plus a clickable version that opens the upstream commit.
+         */
+        private void DrawSupersededModule(Module module, NativeEquivalent superseded) {
+            using (new EditorGUILayout.HorizontalScope()) {
+                var content = new GUIContent(module.DisplayName, superseded.Note);
+                var labelSize = EditorStyles.label.CalcSize(content);
+                using (new EditorGUI.DisabledScope(true)) {
+                    EditorGUILayout.ToggleLeft(content, false, GUILayout.Width(labelSize.x + 22f));
+                }
+                if (Event.current.type == EventType.Repaint) {
+                    // Strike the label only — leave the checkbox (~16 px) on the left untouched.
+                    var row = GUILayoutUtility.GetLastRect();
+                    var strike = new Rect(row.x + 16f, row.y + row.height * 0.5f, labelSize.x, 1f);
+                    EditorGUI.DrawRect(strike, EditorStyles.centeredGreyMiniLabel.normal.textColor);
+                }
+                GUILayout.Space(6);
+                var link = new GUIContent(superseded.Version, superseded.CommitUrl);
+                var linkRect = GUILayoutUtility.GetRect(link, EditorStyles.linkLabel);
+                EditorGUIUtility.AddCursorRect(linkRect, MouseCursor.Link);
+                if (GUI.Button(linkRect, link, EditorStyles.linkLabel)) {
+                    Application.OpenURL(superseded.CommitUrl);
+                }
+                GUILayout.FlexibleSpace();
+            }
+        }
+
+        /**
+         * Sits next to an active toggle whose optimization VRCFury also ships natively but
+         * ours benchmarks faster: a small "overrides VRCFury" note (the reason in its tooltip)
+         * and a clickable version that opens the upstream commit.
+         */
+        private void DrawOverrideBadge(NativeEquivalent overrides) {
+            GUILayout.Space(6);
+            GUILayout.Label(new GUIContent("↦ overrides VRCFury", overrides.Note), EditorStyles.miniLabel);
+            var link = new GUIContent(overrides.Version, overrides.CommitUrl);
+            var linkRect = GUILayoutUtility.GetRect(link, EditorStyles.linkLabel);
+            EditorGUIUtility.AddCursorRect(linkRect, MouseCursor.Link);
+            if (GUI.Button(linkRect, link, EditorStyles.linkLabel)) {
+                Application.OpenURL(overrides.CommitUrl);
+            }
         }
 
         private void DrawDiagnostics() {

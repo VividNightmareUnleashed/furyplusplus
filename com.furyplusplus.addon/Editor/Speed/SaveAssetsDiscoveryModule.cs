@@ -41,6 +41,12 @@ namespace FuryPlusPlus {
             "Replaces the final every-Component asset scan with a pass over VRCFury's created-object registry.";
         internal override IReadOnlyList<ModuleOption> Options => AllOptions;
 
+        internal override NativeEquivalent? OverridesNative => new NativeEquivalent(
+            "1.1364.0",
+            "VRCFury added a native SaveAssets dedup in 1.1364.0; FuryPlusPlus's discovery pass " +
+            "benchmarked faster and takes over (VRCFury's per-component scan is bypassed).",
+            "https://github.com/VRCFury/VRCFury/commit/40b63b38eb1b0dc0152e82c032e3ad50f375656d");
+
         internal override void Install(Harmony harmony, VrcfuryCompat compat) {
             SaveAssetsDuplicateScanPatch.Install(harmony, compat);
         }

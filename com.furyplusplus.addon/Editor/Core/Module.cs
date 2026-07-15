@@ -24,6 +24,27 @@ namespace FuryPlusPlus {
         ExactVersion
     }
 
+    /**
+     * A pointer to a VRCFury-native equivalent of one of our modules — the version that
+     * shipped it, a one-line note, and the upstream commit. Used two ways (see Module):
+     * Superseded (VRCFury's is equal-or-better, ours removed) and OverridesNative (ours is
+     * faster and takes over).
+     */
+    internal readonly struct NativeEquivalent {
+        /** VRCFury version that shipped the native equivalent, e.g. "1.1364.0". */
+        internal readonly string Version;
+        /** One line on the relationship (what VRCFury does / why ours wins). */
+        internal readonly string Note;
+        /** Full github.com commit URL for the native implementation. */
+        internal readonly string CommitUrl;
+
+        internal NativeEquivalent(string version, string note, string commitUrl) {
+            Version = version;
+            Note = note;
+            CommitUrl = commitUrl;
+        }
+    }
+
     internal abstract class Module {
         /** Stable identifier; used as the EditorPrefs key stem and stats key. Lowercase camelCase, no dots. */
         internal abstract string Id { get; }
@@ -31,6 +52,20 @@ namespace FuryPlusPlus {
         internal abstract ModuleKind Kind { get; }
         internal virtual string Description => "";
         internal virtual bool DefaultEnabled => true;
+
+        /**
+         * Non-null marks a module VRCFury now performs natively (benchmarked equal-or-better
+         * on the pinned version). The registry never installs it and the settings window
+         * renders it struck through with this note. Its patch code has been removed.
+         */
+        internal virtual NativeEquivalent? Superseded => null;
+
+        /**
+         * Non-null marks a still-installed module whose optimization VRCFury also added
+         * natively (later), but which the benchmark still favors — we keep our faster path and
+         * bypass VRCFury's. The settings window notes this next to the (active) toggle.
+         */
+        internal virtual NativeEquivalent? OverridesNative => null;
 
         internal virtual CompatTier RequiredTier =>
             Kind == ModuleKind.Pass ? CompatTier.PublicSdk : CompatTier.ExactVersion;

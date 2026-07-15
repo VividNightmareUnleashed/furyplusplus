@@ -157,8 +157,9 @@ namespace FuryPlusPlus {
 
             harmony.Patch(
                 apply,
-                // Priority.Low: the ported layer-index module's Begin prefix (default priority)
-                // must run first so its GetLayerId/Exists context is live inside our body.
+                // Priority.Low keeps our full-replacement prefix last among any other prefixes
+                // on LayerToTreeService.Apply. GetLayerId/Exists inside our body now resolve
+                // against VRCFury's native VFController layer-id cache (1.1364.0).
                 prefix: new HarmonyMethod(
                     typeof(LayerToTreeBindingIndexPatch).GetMethod(
                         nameof(ApplyPrefix), BindingFlags.Static | BindingFlags.NonPublic)
