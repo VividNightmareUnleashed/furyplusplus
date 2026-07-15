@@ -87,10 +87,12 @@ namespace FuryPlusPlus {
         internal static void InstallAll(Harmony harmony, VrcfuryCompat compat) {
             Statuses.Clear();
             var installed = 0;
+            var superseded = 0;
             foreach (var module in All) {
-                if (module.Superseded is NativeEquivalent superseded) {
+                if (module.Superseded is NativeEquivalent info) {
                     Set(module, ModuleState.Superseded,
-                        $"VRCFury integrated this in {superseded.Version}");
+                        $"VRCFury integrated this in {info.Version}");
+                    superseded++;
                     continue;
                 }
                 if (!compat.Satisfies(module.RequiredTier)) {
@@ -107,9 +109,14 @@ namespace FuryPlusPlus {
                     Log.Warn($"{module.DisplayName} disabled: {e.Message}");
                 }
             }
+            // Superseded modules stay in All (for their struck-through toggle) but are gone by
+            // design, so they leave the ratio — otherwise a healthy install reads as "42/44",
+            // as if two failed. Incompatible/failed modules still count against the total.
+            var eligible = All.Length - superseded;
+            var supersededNote = superseded > 0 ? $", {superseded} superseded" : "";
             Log.Info(
-                $"Ready: {installed}/{All.Length} modules installed for VRCFury {compat.PackageVersion} " +
-                $"(MVID {compat.ModuleVersionId})."
+                $"Ready: {installed}/{eligible} modules installed for VRCFury {compat.PackageVersion}" +
+                $"{supersededNote} (MVID {compat.ModuleVersionId})."
             );
         }
 
