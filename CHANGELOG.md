@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.1.0 — 2026-07-15
+
+Tracks VRCFury 1.1365. VRCFury 1.1364 added its own build-speed caching that overlaps a
+couple of FuryPlusPlus modules, so this release re-pins to the new validated version and
+reconciles the overlap: where VRCFury now matches us we step aside, and where we still win we
+stay and say so. Baked output is unchanged — byte-identical to stock VRCFury — and the ~7–10×
+speedup on a heavy avatar holds.
+
+- **VRCFury pin → 1.1365.0:** the exact `com.vrcfury.vrcfury` pin moves from 1.1363.0 to
+  1.1365.0, so the Creator Companion installs and keeps this version. From-disk installs still
+  load any version and fail closed as before.
+- **Dropped two now-native modules:** VRCFury 1.1364 gave VFController a native cache — the
+  layer list plus a state-machine-to-layer-id lookup — that does the same work as the
+  "Controller layer-list cache" and "Layer-to-tree layer index" modules. Benchmarked, VRCFury's
+  version keeps pace, so keeping ours would only stack a second cache with a different
+  invalidation point. Both are removed; their toggles stay in the settings window, struck
+  through and linking the VRCFury commit that absorbed them.
+- **"Fast SaveAssets discovery" now marked as overriding VRCFury:** VRCFury 1.1364 also added
+  its own SaveAssets de-duplication, but the discovery pass here still benchmarks faster and
+  bypasses it, so the module stays on and its row shows an "overrides VRCFury" note linking the
+  upstream commit.
+
 ## 1.0.1 — 2026-07-14
 
 Distribution and metadata release; bake behavior is unchanged from 1.0.0. FuryPlusPlus is now
