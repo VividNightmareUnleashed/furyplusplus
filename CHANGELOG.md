@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.1 — 2026-07-15
+
+Log-cosmetic fix, no behavior or bake-output change from 1.1.0. The bootstrap console line
+counted the two modules superseded by VRCFury 1.1365 in its "modules installed" total, so a
+clean install read `Ready: 42/44` — as if two modules had failed. Superseded modules now leave
+that ratio (it reads `42/42`) and are noted separately.
+
 ## 1.1.0 — 2026-07-15
 
 Tracks VRCFury 1.1365. VRCFury 1.1364 added its own build-speed caching that overlaps a
