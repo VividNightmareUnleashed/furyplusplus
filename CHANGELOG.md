@@ -1,5 +1,59 @@
 # Changelog
 
+## 1.2.0 — 2026-07-24
+
+Tracks VRCFury 1.1382. VRCFury 1.1370–1.1382 replaced its animation model wholesale: clips,
+bindings, motions, layers and state machines are now detached in-memory objects, loaded once,
+edited, and written back at the end, and several of the extension classes FuryPlusPlus patched
+were deleted along the way. Every module was revalidated against the new model — most were
+rewritten onto it, and twelve are retired because VRCFury now does the same work natively.
+Nothing is left disabled. Where a module claims output-identical behavior, that still holds:
+skin bone arrays and full blendshape and mesh state hash identically with the speed modules on
+and off.
+
+Worth setting expectations: VRCFury's own rewrite made stock bakes roughly 2.4× faster on the
+test avatar. FuryPlusPlus still takes a ~33s bake down to ~3.7s there, but the gap is narrower
+than it was, and most of what remains comes from Armature Link — avatars that don't lean on it
+will see less.
+
+- **VRCFury pin → 1.1382.0:** the exact `com.vrcfury.vrcfury` pin moves from 1.1367.0 to
+  1.1382.0, so the Creator Companion installs and keeps this version. From-disk installs still
+  load any version and fail closed as before.
+- **Twelve more modules retired as native:** "Ordered path rewrite", "Fast Armature Link
+  moves", "Blendshape binding cache", "Layer-to-tree binding index", "Controller parameter
+  index", "Behaviour container filter", "Tracking behaviour index", "Full Controller merge path
+  cache", "Motion graph traversal cache", "Fast SaveAssets discovery", "Consolidated asset
+  container" and "Fast controller asset graph". VRCFury now caches or restructures the same
+  work itself, so keeping ours would only stack a second mechanism with a different
+  invalidation point. Their toggles stay in the settings window, struck through and linking the
+  VRCFury commit that absorbed them.
+- **The whole asset-saving group is now native.** VRCFury narrowed its end-of-build asset scan
+  from every component on the avatar down to the avatar, Renderers, MeshFilters and
+  AudioSources, stopped scanning the same component twice, added a single shared "VRCFury
+  Other" container for generated assets instead of a file each, and stopped re-walking
+  controllers to rediscover assets it had already collected. That is the entire premise of
+  those three modules. "Fast SaveAssets discovery" also loses its "overrides VRCFury" note —
+  the pass it used to override has itself been replaced.
+- **Two retirements were decided by measurement, not by a changed signature:** the motion-graph
+  walks "Motion graph traversal cache" existed to cache now measure 79ms of a 3.7s bake, and
+  binding validation no longer searches the hierarchy at all, so "Full Controller merge path
+  cache" has nothing left to cache.
+- **Fixed: SPS material probe cache cost ~3s on an unrelated phase.** VRCFury now holds one
+  asset-editing batch open for the whole build, and hashing asset dependencies inside it
+  deferred import work onto the next material write. The cache now prefills from the avatar
+  before the batch opens and treats a miss as "don't cache".
+- **Fixed: one-sided blendtree conversion could empty the wrong side.** The conversion assumed
+  the off side is always the second motion, but VRCFury swaps the two for `IfNot`, `Less` and
+  `NotEqual` conditions — on those, the toggle's content could have been emptied instead of its
+  off state. It now picks the side that survives that normalization.
+- **Faster Blendshape Optimizer bake:** the rewritten bake avoids re-reading and rewriting whole
+  mesh vertex arrays per shape, taking that phase from ~463ms to ~70ms on the test avatar with
+  bit-identical output.
+- **Clip deduplication moved to save time:** identical generated clips now hand back the first
+  one's asset as it is written, instead of being created and then repointed. This also absorbs
+  the deduplication half of the retired "Fast controller asset graph". 325 duplicates collapsed
+  on the test avatar.
+
 ## 1.1.2 — 2026-07-15
 
 Tracks VRCFury 1.1367. VRCFury 1.1366 and 1.1367 were haptics and in-editor rendering fixes — an
