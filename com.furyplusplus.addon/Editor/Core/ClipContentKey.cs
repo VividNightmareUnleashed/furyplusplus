@@ -10,13 +10,11 @@ using Object = UnityEngine.Object;
 
 namespace FuryPlusPlus {
     /**
-     * The one clip-content serialization both dedup features share: ClipDedupPass (Quality,
-     * controller-wide dedup mid-build) and FastControllerAssetGraphPatch (Speed, dedup of
-     * generated clips at save) must agree on when two clips count as identical, or the two
-     * features silently disagree. Callers keep their own curve sources and preambles and
-     * append entries through here; coverage is the union of what either needed (settings,
+     * The clip-content serialization ClipDedupPass keys on: two clips count as identical
+     * only when everything appended here matches. Callers keep their own curve sources and
+     * preambles and append entries through here; coverage is deliberately broad (settings,
      * frame rate, wrap modes, bounds, events, every keyframe facet), so a facet added here
-     * reaches both.
+     * tightens every consumer at once rather than letting two of them disagree.
      */
     internal static class ClipContentKey {
         // AnimationUtility.GetAnimationClipSettings always returns the same type; hash both

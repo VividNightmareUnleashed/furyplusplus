@@ -48,7 +48,11 @@ namespace FuryPlusPlus {
         internal static MethodInfo GetMaxCost;                // VRCExpressionParametersExtensions.GetMaxCost()
         internal static MethodInfo ParamsClone;               // VRCExpressionParametersExtensions.Clone(paramz)
 
-        internal static MethodInfo ControllersGetAllReadOnly; // ControllersService.GetAllReadOnlyControllers()
+        // VRCFury 1.1372.0 deleted GetAllReadOnlyControllers (it re-loaded every controller from
+        // its asset on each call). GetAllUsedControllers is the successor VRCFury moved its own
+        // IsParamUsed onto, and it yields ControllerManager (a VFController), so the parameter
+        // and layer surface both consumers need is reachable straight off the wrapper.
+        internal static MethodInfo ControllersGetAll;         // ControllersService.GetAllUsedControllers()
 
         internal static MethodInfo CompressorMenuItemGet;     // CompressorMenuItem.Get()
 
@@ -137,8 +141,8 @@ namespace FuryPlusPlus {
 
             var controllersServiceType = ReflectionUtils.FindType("VF.Service.ControllersService");
             if (controllersServiceType != null) {
-                ControllersGetAllReadOnly = ReflectionUtils.FindUniqueMethod(
-                    controllersServiceType, "GetAllReadOnlyControllers",
+                ControllersGetAll = ReflectionUtils.FindUniqueMethod(
+                    controllersServiceType, "GetAllUsedControllers",
                     method => method.GetParameters().Length == 0);
                 GetFx = ReflectionUtils.FindUniqueMethod(controllersServiceType, "GetFx",
                     method => method.GetParameters().Length == 0);
@@ -150,8 +154,11 @@ namespace FuryPlusPlus {
 
             // SetAap(clip, name, FloatOrObjectCurve) — the curve arg converts from float via op_Implicit.
             var clipExtType = ReflectionUtils.FindType("VF.Utils.AnimationClipExtensions");
-            ClipSetAap = clipExtType == null ? null : ReflectionUtils.FindUniqueMethod(clipExtType, "SetAap",
-                method => method.GetParameters().Length == 3);
+            // Now an instance method on VFClip: SetAap(paramName, curve).
+            var vfClipType = ReflectionUtils.FindType("VF.Utils.Controller.VFClip");
+            ClipSetAap = vfClipType == null ? null : ReflectionUtils.FindUniqueMethod(vfClipType, "SetAap",
+                method => method.GetParameters().Length == 2
+                          && method.GetParameters()[0].ParameterType == typeof(string));
             var curveType = ReflectionUtils.FindType("VF.Utils.FloatOrObjectCurve");
             FloatToCurve = curveType?
                 .GetMethods(BindingFlags.Static | BindingFlags.Public)

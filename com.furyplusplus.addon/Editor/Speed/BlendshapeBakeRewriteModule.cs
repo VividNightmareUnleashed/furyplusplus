@@ -62,7 +62,7 @@ namespace FuryPlusPlus {
         private static FieldInfo avatarField;
         private static FieldInfo controllersField;
         private static FieldInfo animatorsField;
-        private static MethodInfo getBindings;
+        private static MethodInfo getBlendshapeCurves;
         private static MethodInfo getAllUsedControllers;
         private static MethodInfo getSubControllers;
         private static MethodInfo vfGetComponentsInSelfAndChildren;
@@ -107,10 +107,15 @@ namespace FuryPlusPlus {
             controllersField = ReflectionUtils.Demand(
                 builderType.GetField("controllers", any), "builder.controllers");
             animatorsField = ReflectionUtils.Demand(builderType.GetField("animators", any), "builder.animators");
-            getBindings = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(builderType, "GetBindings",
-                    method => method.GetParameters().Length == 2),
-                "builder.GetBindings(owner, controller)");
+            // 1.1382 folded the owner argument away — a VFBinding carries its own resolved
+            // object, so blendshape curves are collected per controller alone.
+            getBlendshapeCurves = ReflectionUtils.Demand(
+                ReflectionUtils.FindUniqueMethod(builderType, "GetBlendshapeCurves",
+                    method => method.GetParameters().Length == 1),
+                "builder.GetBlendshapeCurves(controller)");
+            ClipCurveCompat.EnsureResolved();
+            ReflectionUtils.Demand(ClipCurveCompat.BindingTarget, "VFBinding.target");
+            ReflectionUtils.Demand(ClipCurveCompat.BindingPropertyName, "VFBinding.propertyName");
             getAllUsedControllers = ReflectionUtils.Demand(
                 ReflectionUtils.FindUniqueMethod(controllersServiceType, "GetAllUsedControllers",
                     method => method.GetParameters().Length == 0),
@@ -194,44 +199,49 @@ namespace FuryPlusPlus {
                 BlendshapeBakeRewriteModule.Instance,
                 BlendshapeBakeRewriteModule.FixMultiFrameInterpolation);
 
-            // (a) HOISTED: skin-invariant animated-binding collection, one pass.
+            // Skin-invariant blendshape-curve collection, one pass. VRCFury hoists this out
+            // of the per-mesh loop itself now (it hands CollectAnimatedBlendshapesForMesh a
+            // Lazy), but it still rescans the whole list per skin — so bucket by the
+            // binding's resolved target object, giving an O(1) lookup per skin instead.
             var controllersService = controllersField.GetValue(builder);
             var animatorsService = animatorsField.GetValue(builder);
-            var animatedBindings = new List<(EditorCurveBinding Binding, AnimationCurve Curve)>();
-            void AddBindings(object owner, object controller) {
-                var bindings = (IEnumerable)ReflectionUtils.InvokeUnwrapped(
-                    getBindings, builder, new[] { owner, controller });
-                foreach (var entry in bindings) {
+            var blendshapeBindingsByTarget =
+                new Dictionary<object, List<(string Blendshape, AnimationCurve Curve)>>();
+
+            void AddCurves(object controller) {
+                var curves = (IEnumerable)ReflectionUtils.InvokeUnwrapped(
+                    getBlendshapeCurves, builder, new[] { controller });
+                foreach (var entry in curves) {
                     if (bindingsItem1 == null) {
                         var entryType = entry.GetType();
                         bindingsItem1 = entryType.GetField("Item1");
                         bindingsItem2 = entryType.GetField("Item2");
                     }
-                    var binding = (EditorCurveBinding)bindingsItem1.GetValue(entry);
+                    var binding = bindingsItem1.GetValue(entry);
                     var curve = (AnimationCurve)bindingsItem2.GetValue(entry);
-                    animatedBindings.Add((binding, curve));
+                    // GetBlendshapeCurves already filters to SkinnedMeshRenderer +
+                    // "blendShape." — an unresolved binding targets nothing and can never
+                    // match a skin, so it is dropped here rather than scanned per mesh.
+                    var target = ClipCurveCompat.TargetOf(binding);
+                    if (target == null || curve == null) continue;
+                    var propertyName = ClipCurveCompat.PropertyNameOf(binding);
+                    if (propertyName == null || !propertyName.StartsWith("blendShape.")) continue;
+                    blendshapeBindingsByTarget.GetOrAddList(target)
+                        .Add((propertyName.Substring(11), curve));
                 }
             }
+
             foreach (var manager in (IEnumerable)getAllUsedControllers.Invoke(controllersService, null)) {
-                AddBindings(avatarObject, manager);
+                AddCurves(manager);
             }
             foreach (var pair in (IEnumerable)getSubControllers.Invoke(animatorsService, null)) {
-                if (pairItem1 == null) {
+                if (pairItem2 == null) {
                     var pairType = pair.GetType();
                     pairItem1 = pairType.GetField("Item1");
                     pairItem2 = pairType.GetField("Item2");
                 }
-                AddBindings(pairItem1.GetValue(pair), pairItem2.GetValue(pair));
-            }
-
-            // Bucket the skin-invariant blendshape bindings by path once, instead of
-            // rescanning the full binding list for every skinned mesh below.
-            var blendshapeBindingsByPath = new Dictionary<string, List<(string Blendshape, AnimationCurve Curve)>>();
-            foreach (var (binding, curve) in animatedBindings) {
-                if (binding.type != typeof(SkinnedMeshRenderer)) continue;
-                if (!binding.propertyName.StartsWith("blendShape.")) continue;
-                blendshapeBindingsByPath.GetOrAddList(binding.path)
-                    .Add((binding.propertyName.Substring(11), curve));
+                // (owner, controller) — the owner is no longer needed to resolve bindings.
+                AddCurves(pairItem2.GetValue(pair));
             }
 
             var logOutput = new StringBuilder();
@@ -248,7 +258,7 @@ namespace FuryPlusPlus {
                 logOutput.Append($"\n┬─ Optimizing {path}\n");
 
                 var animatedBlendshapes = CollectAnimatedBlendshapesForMesh(
-                    skin, path, blendshapeBindingsByPath, avatar);
+                    skin, skinOwnerObj, blendshapeBindingsByTarget, avatar);
 
                 bool ShouldKeepName(string name) {
                     if (animatedBlendshapes.Contains(name)) return true;
@@ -455,15 +465,21 @@ namespace FuryPlusPlus {
             return new HashSet<int>(source);
         }
 
+        /**
+         * Mirrors VRCFury's CollectAnimatedBlendshapesForMesh. Bindings are matched by their
+         * resolved target object (VFBinding.Targets), not by path string — object identity is
+         * what VRCFury itself compares now, and it stays correct across renames and moves.
+         */
         private static HashSet<string> CollectAnimatedBlendshapesForMesh(
             SkinnedMeshRenderer skin,
-            string skinPath,
-            Dictionary<string, List<(string Blendshape, AnimationCurve Curve)>> blendshapeBindingsByPath,
+            object skinOwnerObj,
+            Dictionary<object, List<(string Blendshape, AnimationCurve Curve)>> blendshapeBindingsByTarget,
             VRCAvatarDescriptor avatar
         ) {
             var animatedBlendshapes = new HashSet<string>();
             var mesh = skin.sharedMesh;
-            if (blendshapeBindingsByPath.TryGetValue(skinPath, out var bindings)) {
+            if (skinOwnerObj != null
+                && blendshapeBindingsByTarget.TryGetValue(skinOwnerObj, out var bindings)) {
                 foreach (var (blendshape, curve) in bindings) {
                     var index = mesh != null ? mesh.GetBlendShapeIndex(blendshape) : -1;
                     if (index < 0) continue;

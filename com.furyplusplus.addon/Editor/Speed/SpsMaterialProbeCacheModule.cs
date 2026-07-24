@@ -68,8 +68,35 @@ namespace FuryPlusPlus {
             );
         }
 
-        private static void InvalidateDependencyHashes() {
+        /**
+         * VRCFury 1.1370+ holds one AssetDatabase.StartAssetEditing batch open for the whole
+         * build (VRCFuryBuildContext). AssetDatabase.GetAssetDependencyHash inside that batch
+         * defers import work that Unity later flushes on the next material write, so paying it
+         * per probe cost ~3s on a modern-SPS avatar and landed on
+         * AvatarBindingStateService.ApplyModifiedMaterialProperties. The RunMain prefix runs
+         * before the build context opens the batch, so every hash this cache can need is
+         * computed here, outside it. BuildSignature then only reads the table.
+         */
+        private static void InvalidateDependencyHashes(object __0) {
             DependencyHashes.Clear();
+
+            var avatar = VfGameObjectCompat.Unwrap(__0);
+            if (avatar == null) return;
+
+            try {
+                foreach (var renderer in avatar.GetComponentsInChildren<Renderer>(true)) {
+                    if (renderer == null) continue;
+                    foreach (var material in renderer.sharedMaterials) {
+                        if (material == null) continue;
+                        var path = AssetDatabase.GetAssetPath(material);
+                        if (string.IsNullOrEmpty(path)) continue;
+                        if (DependencyHashes.ContainsKey(path)) continue;
+                        DependencyHashes[path] = AssetDatabase.GetAssetDependencyHash(path);
+                    }
+                }
+            } catch {
+                // A partial table is safe: BuildSignature treats a miss as "don't cache".
+            }
         }
 
         private static bool GetCached(Renderer r, ref bool __result, out string __state) {
@@ -143,10 +170,10 @@ namespace FuryPlusPlus {
                         out long localId
                     )) return null;
 
-                if (!DependencyHashes.TryGetValue(path, out var dependencyHash)) {
-                    dependencyHash = AssetDatabase.GetAssetDependencyHash(path);
-                    DependencyHashes.Add(path, dependencyHash);
-                }
+                // Never hash here: this runs inside VRCFury's build-wide asset-editing batch,
+                // where GetAssetDependencyHash is pathological. The RunMain prefix prefilled
+                // every material reachable from the avatar; anything else goes uncached.
+                if (!DependencyHashes.TryGetValue(path, out var dependencyHash)) return null;
                 builder.Append(guid).Append(':').Append(localId).Append(':')
                     .Append(dependencyHash).Append(';');
             }

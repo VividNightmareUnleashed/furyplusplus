@@ -1,17 +1,20 @@
-using System;
-using System.Collections.Generic;
 using HarmonyLib;
-using UnityEditor;
 
 namespace FuryPlusPlus {
     /**
-     * Memoizes ValidateBindingsService.IsValid during the FullController merge phase.
-     * CreateNearestMatchPathRewriter probes IsValid once per ancestor level per distinct
-     * binding per clip — each probe is a full transform-path Find plus GetComponent — and
-     * its own cache neither spans clips nor merges. The avatar hierarchy is verifiably
-     * stable during this phase (object moves happen later, at SecurityRestricted/
-     * ArmatureLink), so the answer for a binding cannot change; a defensive flush on any
-     * ObjectMoveService.Move keeps us honest if upstream ever reorders.
+     * SUPERSEDED. ValidateBindingsService.IsValid used to take an EditorCurveBinding and
+     * resolve it from scratch on every call — a transform-path Find plus a GetComponent —
+     * and FullControllerBuilder's CreateNearestMatchPathRewriter probed it once per ancestor
+     * level per distinct binding per clip. This module memoized those answers for the
+     * duration of the merge phase.
+     *
+     * Both halves of that are gone at 1.1382.0. CreateNearestMatchPathRewriter no longer
+     * exists, and IsValid now takes a VFBinding whose target is an already-resolved object:
+     * it reads binding.target and does a single IsValidResolvedTarget check. The ancestor
+     * walk still exists, but it moved into binding *resolution*, which happens once when a
+     * controller is loaded rather than on every validity probe. There is no repeated path
+     * search left to memoize, so the patch code is removed and the toggle stays (struck
+     * through).
      */
     internal sealed class MergePathCacheModule : Module<MergePathCacheModule> {
 
@@ -20,81 +23,14 @@ namespace FuryPlusPlus {
         internal override ModuleKind Kind => ModuleKind.Speed;
         internal override string SettingsGroup => "Paths & rewriting";
         internal override string Description =>
-            "Caches binding-path validation during Full Controller merges — the dominant " +
-            "cost on avatars assembled from many prefab controllers.";
+            "Superseded by VRCFury's resolved-object bindings (1.1382.0).";
 
-        internal override void Install(Harmony harmony, VrcfuryCompat compat) {
-            MergePathCachePatch.Install(harmony, compat);
-        }
-    }
+        internal override NativeEquivalent? Superseded => new NativeEquivalent(
+            "1.1382.0",
+            "Bindings carry an already-resolved target object, so validating one no longer " +
+            "searches the hierarchy by path.",
+            "https://github.com/VRCFury/VRCFury/commit/21674b90da9a4d7ed1cec1f4b443d17ece7be916");
 
-    internal static class MergePathCachePatch {
-        [ThreadStatic] private static Dictionary<EditorCurveBinding, bool> memo;
-
-        internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
-            var builderType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Feature.FullControllerBuilder"), "VF.Feature.FullControllerBuilder");
-            var validateType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Service.ValidateBindingsService"), "VF.Service.ValidateBindingsService");
-            var moveServiceType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Service.ObjectMoveService"), "VF.Service.ObjectMoveService");
-
-            var apply = ReflectionUtils.Demand(
-                ReflectionUtils.FindNoArgVoid(builderType, "Apply"), "FullControllerBuilder.Apply()");
-            var isValid = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(validateType, "IsValid",
-                    method => method.GetParameters().Length == 1
-                              && method.GetParameters()[0].ParameterType == typeof(EditorCurveBinding)
-                              && method.ReturnType == typeof(bool)),
-                "ValidateBindingsService.IsValid(EditorCurveBinding)");
-            var move = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(moveServiceType, "Move",
-                    method => method.GetParameters().Length == 5),
-                "ObjectMoveService.Move(...)");
-
-            harmony.Patch(
-                apply,
-                prefix: new HarmonyMethod(typeof(MergePathCachePatch), nameof(Begin)),
-                finalizer: new HarmonyMethod(typeof(MergePathCachePatch), nameof(End))
-            );
-            harmony.Patch(
-                isValid,
-                prefix: new HarmonyMethod(typeof(MergePathCachePatch), nameof(IsValidPrefix)),
-                postfix: new HarmonyMethod(typeof(MergePathCachePatch), nameof(IsValidPostfix))
-            );
-            harmony.Patch(
-                move,
-                postfix: new HarmonyMethod(typeof(MergePathCachePatch), nameof(Flush))
-            );
-        }
-
-        private static void Begin() {
-            memo = MergePathCacheModule.Instance?.Enabled == true
-                ? new Dictionary<EditorCurveBinding, bool>()
-                : null;
-        }
-
-        private static Exception End(Exception __exception) {
-            memo = null;
-            return __exception;
-        }
-
-        private static void Flush() {
-            // Hierarchy mutated mid-phase (unexpected at 1.1363) — drop everything.
-            memo?.Clear();
-        }
-
-        private static bool IsValidPrefix(EditorCurveBinding binding, ref bool __result) {
-            var localMemo = memo;
-            if (localMemo == null) return true;
-            if (!localMemo.TryGetValue(binding, out var cached)) return true;
-            __result = cached;
-            return false;
-        }
-
-        private static void IsValidPostfix(EditorCurveBinding binding, bool __result) {
-            var localMemo = memo;
-            if (localMemo != null) localMemo[binding] = __result;
-        }
+        internal override void Install(Harmony harmony, VrcfuryCompat compat) { }
     }
 }

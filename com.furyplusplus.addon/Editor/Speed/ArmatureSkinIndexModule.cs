@@ -67,19 +67,21 @@ namespace FuryPlusPlus {
                 typeof(UnityEngine.Object)
             );
 
-            // PORT-NOTE: ApplyDeferred lived on QuickFury's VrcfuryCompatibility; VrcfuryCompat
-            // has no such member, so resolve it here with the same predicates as QuickFury's
-            // VrcfuryCompatibility.TryCreate.
-            var objectMoveServiceType = ReflectionUtils.FindType("VF.Service.ObjectMoveService");
-            var applyDeferred = ReflectionUtils.FindUniqueMethod(
-                objectMoveServiceType,
-                "ApplyDeferred",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                method => method.ReturnType == typeof(void) && method.GetParameters().Length == 0
+            // PORT-NOTE: this used to flush on ObjectMoveService.ApplyDeferred, which VRCFury
+            // 1.1370 removed along with the whole deferred-move mechanism (moves are immediate
+            // now, and animations retarget through VFResolvedObject instead of path rewrites).
+            // The batch instead flushes wherever ArmatureLinkService itself reads skin state:
+            // GetRootName tests `skin.bones.Contains(...)`, and with several links on one avatar
+            // it runs after an earlier link's RewriteSkins. Flushing there keeps every in-Apply
+            // read seeing committed bones, so batching stays invisible to VRCFury.
+            var getRootName = ReflectionUtils.FindUniqueMethod(
+                armatureType,
+                "GetRootName",
+                method => method.ReturnType == typeof(string) && method.GetParameters().Length == 2
             );
 
             if (!ArmatureCompat.ArmatureLinkAvailable || rewriteSkins == null
-                || applyDeferred == null || getMutableMesh == null || dirty == null) {
+                || getRootName == null || getMutableMesh == null || dirty == null) {
                 throw new InvalidOperationException("target signature mismatch");
             }
 
@@ -93,7 +95,7 @@ namespace FuryPlusPlus {
                 prefix: new HarmonyMethod(typeof(ArmatureSkinIndexPatch), nameof(RecordRewrite))
             );
             harmony.Patch(
-                applyDeferred,
+                getRootName,
                 prefix: new HarmonyMethod(typeof(ArmatureSkinIndexPatch), nameof(Flush))
             );
         }
@@ -112,7 +114,14 @@ namespace FuryPlusPlus {
         }
 
         private static Exception End(Exception __exception) {
-            active = null;
+            try {
+                // Bones recorded after the last GetRootName still have to land.
+                Flush();
+            } catch (Exception e) {
+                Log.Warn("Batched skin rewrite fell back to VRCFury: " + e.Message);
+            } finally {
+                active = null;
+            }
             return __exception;
         }
 
@@ -134,9 +143,13 @@ namespace FuryPlusPlus {
             return false;
         }
 
+        /**
+         * Commits what has been recorded so far and keeps batching for the rest of Apply.
+         * Clearing the list is required for correctness, not just tidiness: BindposeDelta is
+         * applied multiplicatively, so replaying an already-committed rewrite would compound it.
+         */
         private static void Flush() {
             var context = active;
-            active = null;
             if (context == null) return;
 
             if (context.Avatar == null || context.Rewrites.Count == 0) return;
@@ -145,6 +158,7 @@ namespace FuryPlusPlus {
                 if (skin == null) continue;
                 RewriteSkin(skin, context.Rewrites);
             }
+            context.Rewrites.Clear();
         }
 
         private static void RewriteSkin(SkinnedMeshRenderer skin, IReadOnlyList<Rewrite> rewrites) {

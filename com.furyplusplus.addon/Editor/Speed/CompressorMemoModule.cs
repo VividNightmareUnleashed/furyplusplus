@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using HarmonyLib;
 using UnityEditor.Animations;
+using UnityEngine;
 using VRC.SDK3.Avatars.ScriptableObjects;
 
 namespace FuryPlusPlus {
@@ -47,8 +48,8 @@ namespace FuryPlusPlus {
         private static MethodInfo getReadOnlyMenu;
         private static FieldInfo controllersParamsServiceField;
         private static MethodInfo getReadOnlyParams;
-        private static MethodInfo getAllReadOnlyControllers;
-        private static FieldInfo vfControllerCtrlField;
+        private static MethodInfo getAllControllers;
+        private static PropertyInfo vfControllerParameters;
 
         // Priority order copied from ParameterCompressorSolverService.MenuTypePriority —
         // later entries win ties (the stock replace rule is newIndex >= oldIndex).
@@ -113,13 +114,18 @@ namespace FuryPlusPlus {
                 ReflectionUtils.FindUniqueMethod(paramsServiceType, "GetReadOnlyParams",
                     method => method.GetParameters().Length == 0),
                 "ParamsService.GetReadOnlyParams()");
-            getAllReadOnlyControllers = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(controllersServiceType, "GetAllReadOnlyControllers",
+            // VRCFury 1.1372.0 deleted GetAllReadOnlyControllers and VFController.ctrl along with
+            // it: controllers are an in-memory model now, not a wrapper around a live asset.
+            // GetAllUsedControllers is what VRCFury moved its own IsParamUsed onto, and the
+            // parameter list is exposed straight off the wrapper, so the raw AnimatorController
+            // never has to be reached for. This also covers generated controllers, which the old
+            // asset-loading read-only list could not see.
+            getAllControllers = ReflectionUtils.Demand(
+                ReflectionUtils.FindUniqueMethod(controllersServiceType, "GetAllUsedControllers",
                     method => method.GetParameters().Length == 0),
-                "ControllersService.GetAllReadOnlyControllers()");
-            ClipCurveCompat.EnsureResolved();
-            vfControllerCtrlField = ReflectionUtils.Demand(
-                ClipCurveCompat.ControllerCtrlField, "VFController.ctrl");
+                "ControllersService.GetAllUsedControllers()");
+            vfControllerParameters = ReflectionUtils.Demand(
+                vfControllerType.GetProperty("parameters", any), "VFController.parameters");
 
             harmony.Patch(
                 apply,
@@ -260,10 +266,10 @@ namespace FuryPlusPlus {
                             if (!string.IsNullOrEmpty(parameter?.name)) names.Add(parameter.name);
                         }
                     }
-                    var wrappers = (IEnumerable)getAllReadOnlyControllers.Invoke(__instance, null);
+                    var wrappers = (IEnumerable)getAllControllers.Invoke(__instance, null);
                     foreach (var wrapper in wrappers) {
-                        if (vfControllerCtrlField.GetValue(wrapper) is AnimatorController controller) {
-                            foreach (var parameter in controller.parameters) {
+                        if (vfControllerParameters.GetValue(wrapper) is AnimatorControllerParameter[] parameters) {
+                            foreach (var parameter in parameters) {
                                 if (!string.IsNullOrEmpty(parameter?.name)) names.Add(parameter.name);
                             }
                         }

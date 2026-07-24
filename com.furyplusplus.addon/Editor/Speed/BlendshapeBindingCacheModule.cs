@@ -1,16 +1,14 @@
-using System;
-using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 using HarmonyLib;
-using UnityEditor;
-using UnityEngine;
 
 namespace FuryPlusPlus {
     /**
-     * BlendshapeOptimizerBuilder used to enumerate every clip and float curve in
-     * every controller once for every skinned mesh. The controller graph is not
-     * mutated during this action, so cache the exact GetBindings result for each
-     * (owner, controller) pair for the duration of Apply.
+     * SUPERSEDED. BlendshapeOptimizerBuilder used to call GetBindings from inside
+     * CollectAnimatedBlendshapesForMesh, so every clip and float curve in every controller was
+     * re-enumerated once per skinned mesh; this cached that result per (owner, controller) for
+     * the duration of Apply. VRCFury 1.1372.0 hoisted the scan out of the loop itself — Apply
+     * now builds the blendshape curve list once and hands CollectAnimatedBlendshapesForMesh a
+     * Lazy over it. There is no per-mesh rescan left to cache, so the patch code is removed and
+     * the toggle stays (struck through) pointing at the upstream commit.
      */
     internal sealed class BlendshapeBindingCacheModule : Module<BlendshapeBindingCacheModule> {
 
@@ -19,108 +17,13 @@ namespace FuryPlusPlus {
         internal override ModuleKind Kind => ModuleKind.Speed;
         internal override string SettingsGroup => "Controllers & animation";
         internal override string Description =>
-            "Caches BlendshapeOptimizer's per-(mesh, controller) binding scans for the duration of its Apply pass.";
+            "Superseded by VRCFury's native hoist of the blendshape curve scan (1.1372.0).";
 
-        internal override void Install(Harmony harmony, VrcfuryCompat compat) {
-            BlendshapeBindingCachePatch.Install(harmony, compat);
-        }
-    }
+        internal override NativeEquivalent? Superseded => new NativeEquivalent(
+            "1.1372.0",
+            "BlendshapeOptimizer now collects the blendshape curves once per Apply instead of once per skinned mesh.",
+            "https://github.com/VRCFury/VRCFury/commit/fce41fe6123787a195283e5e0ee4410ec6fca0b0");
 
-    internal static class BlendshapeBindingCachePatch {
-        private readonly struct CacheKey : IEquatable<CacheKey> {
-            internal readonly object Owner;
-            internal readonly object Controller;
-
-            internal CacheKey(object owner, object controller) {
-                Owner = owner;
-                Controller = controller;
-            }
-
-            public bool Equals(CacheKey other) {
-                return ReferenceEquals(Owner, other.Owner)
-                       && ReferenceEquals(Controller, other.Controller);
-            }
-
-            public override bool Equals(object obj) {
-                return obj is CacheKey other && Equals(other);
-            }
-
-            public override int GetHashCode() {
-                unchecked {
-                    return (RuntimeHelpers.GetHashCode(Owner) * 397)
-                           ^ RuntimeHelpers.GetHashCode(Controller);
-                }
-            }
-        }
-
-        private sealed class Context {
-            internal readonly Dictionary<CacheKey, ICollection<(EditorCurveBinding, AnimationCurve)>> Results =
-                new Dictionary<CacheKey, ICollection<(EditorCurveBinding, AnimationCurve)>>();
-        }
-
-        [ThreadStatic] private static Context active;
-
-        internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
-            var type = ReflectionUtils.FindType("VF.Feature.BlendshapeOptimizerBuilder");
-            var apply = ReflectionUtils.FindNoArgVoid(type, "Apply");
-            var getBindings = ReflectionUtils.FindUniqueMethod(
-                type,
-                "GetBindings",
-                method => method.GetParameters().Length == 2
-            );
-
-            if (apply == null || getBindings == null) {
-                throw new InvalidOperationException("target signature mismatch");
-            }
-
-            harmony.Patch(
-                apply,
-                prefix: new HarmonyMethod(typeof(BlendshapeBindingCachePatch), nameof(Begin)),
-                finalizer: new HarmonyMethod(typeof(BlendshapeBindingCachePatch), nameof(End))
-            );
-            harmony.Patch(
-                getBindings,
-                prefix: new HarmonyMethod(typeof(BlendshapeBindingCachePatch), nameof(GetCached)),
-                postfix: new HarmonyMethod(typeof(BlendshapeBindingCachePatch), nameof(Store))
-            );
-        }
-
-        private static void Begin() {
-            active = BlendshapeBindingCacheModule.Instance?.Enabled == true ? new Context() : null;
-        }
-
-        private static Exception End(Exception __exception) {
-            active = null;
-            return __exception;
-        }
-
-        private static bool GetCached(
-            object obj,
-            object controller,
-            ref ICollection<(EditorCurveBinding, AnimationCurve)> __result,
-            out CacheKey? __state
-        ) {
-            __state = null;
-            var context = active;
-            if (context == null || obj == null || controller == null) return true;
-
-            var key = new CacheKey(obj, controller);
-            if (context.Results.TryGetValue(key, out var cached)) {
-                __result = cached;
-                return false;
-            }
-
-            __state = key;
-            return true;
-        }
-
-        private static void Store(
-            CacheKey? __state,
-            ICollection<(EditorCurveBinding, AnimationCurve)> __result
-        ) {
-            if (!__state.HasValue || __result == null) return;
-            var context = active;
-            if (context != null) context.Results[__state.Value] = __result;
-        }
+        internal override void Install(Harmony harmony, VrcfuryCompat compat) { }
     }
 }

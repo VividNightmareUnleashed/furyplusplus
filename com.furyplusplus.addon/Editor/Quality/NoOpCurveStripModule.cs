@@ -56,8 +56,9 @@ namespace FuryPlusPlus {
 
         internal static void Resolve() {
             ClipCurveCompat.DemandCore();
-            ReflectionUtils.Demand(ClipCurveCompat.ClipsFromController, "AnimatorIterator.Clips.From(VFController)");
-            ReflectionUtils.Demand(ClipCurveCompat.SetCurves, "AnimationClipExtensions.SetCurves(clip, curves)");
+            ReflectionUtils.Demand(ClipCurveCompat.ClipSetCurves, "VFClip.SetCurves(curves)");
+            ReflectionUtils.Demand(ClipCurveCompat.BindingTryGetCurrentFloat,
+                "VFBinding.TryGetCurrentFloat(root, out value)");
 
             var fixWdType = ReflectionUtils.Demand(
                 ReflectionUtils.FindType("VF.Service.FixWriteDefaultsService"), "VF.Service.FixWriteDefaultsService");
@@ -74,26 +75,29 @@ namespace FuryPlusPlus {
             if (avatarRoot == null || controllersService == null || fixWd == null) {
                 return; // no injector context this run — do nothing
             }
-            var defaultClip = getDefaultClip.Invoke(fixWd, null) as AnimationClip;
+            var vfAvatarRoot = ClipCurveCompat.WrapGameObject(avatarRoot);
+            if (vfAvatarRoot == null) return;
+            var defaultClip = getDefaultClip.Invoke(fixWd, null);
 
-            // Collect every clip of every used controller once.
-            var clips = new HashSet<AnimationClip>();
-            var managers = (IEnumerable)ClipCurveCompat.GetAllUsedControllers.Invoke(controllersService, null);
-            foreach (var manager in managers) {
+            // Collect every clip of every used controller once. Clips are in-memory VFClip
+            // objects, so identity is reference identity.
+            var clips = new HashSet<object>();
+            foreach (var manager in ClipCurveCompat.UsedControllers(controllersService)) {
                 foreach (var clip in ClipCurveCompat.ClipsFrom(manager)) {
-                    if (clip is AnimationClip animationClip) clips.Add(animationClip);
+                    if (clip != null) clips.Add(clip);
                 }
             }
 
             // Pass 1: classify every (binding, curve). A binding is strippable only if EVERY
             // writer of it, in any clip, is a constant float curve equal to the rest value.
-            var blockedBindings = new HashSet<EditorCurveBinding>();
-            var candidates = new List<(AnimationClip Clip, EditorCurveBinding Binding, float Value)>();
-            var restCache = new Dictionary<EditorCurveBinding, (bool Known, float Value)>();
+            // Bindings are boxed VFBinding structs — value-equal across clips by construction.
+            var blockedBindings = new HashSet<object>();
+            var candidates = new List<(object Clip, object Binding, float Value)>();
+            var restCache = new Dictionary<object, (bool Known, float Value)>();
 
-            (bool Known, float Value) RestOf(EditorCurveBinding binding) {
+            (bool Known, float Value) RestOf(object binding) {
                 if (restCache.TryGetValue(binding, out var cached)) return cached;
-                var known = AnimationUtility.GetFloatValue(avatarRoot, binding, out var value);
+                var known = ClipCurveCompat.TryGetRestValue(binding, vfAvatarRoot, out var value);
                 var result = (known, value);
                 restCache[binding] = result;
                 return result;
@@ -105,8 +109,9 @@ namespace FuryPlusPlus {
                     var binding = ClipCurveCompat.TupleBinding(entry);
                     var curve = ClipCurveCompat.TupleCurve(entry);
 
-                    // AAPs are parameters, not properties — never touch.
-                    if (binding.type == typeof(Animator) && string.IsNullOrEmpty(binding.path)) {
+                    // AAPs and humanoid muscles are animator-stream values, not scene
+                    // properties — they have no resting value to fall back to. Never touch.
+                    if (ClipCurveCompat.IsAnimatorBinding(binding)) {
                         blockedBindings.Add(binding);
                         continue;
                     }
@@ -120,7 +125,8 @@ namespace FuryPlusPlus {
                         continue;
                     }
                     var rest = RestOf(binding);
-                    if (!rest.Known || !ValuesMatch(binding, value, rest.Value)) {
+                    if (!rest.Known
+                        || !ValuesMatch(ClipCurveCompat.PropertyNameOf(binding), value, rest.Value)) {
                         blockedBindings.Add(binding);
                         continue;
                     }
@@ -128,12 +134,12 @@ namespace FuryPlusPlus {
                 }
             }
 
-            // Pass 2: strip surviving candidates per clip (never proxies or the defaults clip;
-            // untouched user-clip copies are only mutated when something is actually removed,
-            // preserving VRCFury's original-clip aliasing at save).
+            // Pass 2: strip surviving candidates per clip (never proxies or the defaults clip).
+            // VFClip.SetCurves flags the clip as changed-from-source, so a clip that keeps all
+            // its curves is never touched and stays eligible to alias its original user asset.
             var byClip = candidates
                 .Where(candidate => !blockedBindings.Contains(candidate.Binding))
-                .Where(candidate => candidate.Clip != defaultClip)
+                .Where(candidate => !ReferenceEquals(candidate.Clip, defaultClip))
                 .GroupBy(candidate => candidate.Clip);
 
             var strippedCurves = 0;
@@ -145,14 +151,16 @@ namespace FuryPlusPlus {
                 var removals = group.ToList();
                 if (removals.Count == 0) continue;
 
-                var tuples = Array.CreateInstance(ClipCurveCompat.CurveTupleType, removals.Count);
-                for (var i = 0; i < removals.Count; i++) {
-                    tuples.SetValue(ClipCurveCompat.CreateTuple(removals[i].Binding, null), i);
+                var batch = ClipCurveCompat.NewCurveBatch();
+                foreach (var removal in removals) {
+                    // A null curve is how VFClip.SetCurves spells "remove this binding".
+                    ClipCurveCompat.AddToBatch(batch, removal.Binding, null);
                     if (examples.Count < 8) {
-                        examples.Add($"{removals[i].Binding.path}/{removals[i].Binding.propertyName}={removals[i].Value}");
+                        examples.Add($"{ClipCurveCompat.DebugPathOf(removal.Binding)}/" +
+                                     $"{ClipCurveCompat.PropertyNameOf(removal.Binding)}={removal.Value}");
                     }
                 }
-                ClipCurveCompat.SetCurves.Invoke(null, new object[] { clip, tuples });
+                ClipCurveCompat.SetCurves(clip, batch);
                 strippedCurves += removals.Count;
                 touchedClips++;
             }
@@ -187,11 +195,12 @@ namespace FuryPlusPlus {
             return true;
         }
 
-        internal static bool ValuesMatch(EditorCurveBinding binding, float curveValue, float restValue) {
+        internal static bool ValuesMatch(string propertyName, float curveValue, float restValue) {
             if (curveValue.Equals(restValue)) return true;
             // Blendshape weights round-trip through floats; VRCFury itself compares them
             // approximately (BlendshapeOptimizerBuilder does the same).
-            return binding.propertyName.StartsWith("blendShape.")
+            return propertyName != null
+                   && propertyName.StartsWith("blendShape.")
                    && Mathf.Approximately(curveValue, restValue);
         }
     }

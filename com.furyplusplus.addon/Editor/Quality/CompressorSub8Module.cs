@@ -92,6 +92,10 @@ namespace FuryPlusPlus {
         private static System.Reflection.MethodInfo controllerManagerOne; // ControllerManager.One() → VFAFloat
         private static System.Reflection.MethodInfo vfaApName;            // BlendtreeMath.VFAap.Name()
         private static System.Reflection.MethodInfo factoryCreate;       // VrcfObjectFactory.Create(Type, Object)
+        // Closed over VRCAvatarParameterDriver — behaviour containers hand back VFBehaviour
+        // wrappers, so every driver has to come out through the typed accessor.
+        private static System.Reflection.MethodInfo driverBehavioursAdd;
+        private static System.Reflection.MethodInfo driverBehavioursGet;
 
         internal static void Resolve() {
             CompressorCompat.DemandCore();
@@ -105,11 +109,37 @@ namespace FuryPlusPlus {
             ReflectionUtils.Demand(CompressorCompat.MakeAap, "ControllerManager.MakeAap(string, float, bool)");
 
             ToggleTreeCompat.EnsureResolved();
-            ReflectionUtils.Demand(ToggleTreeCompat.GetRaw, "VFController.GetRaw()");
+            ReflectionUtils.Demand(ToggleTreeCompat.GetLayers, "VFController.GetLayers()");
             ReflectionUtils.Demand(ToggleTreeCompat.NewLayer, "ControllerManager.NewLayer(string, int)");
             ReflectionUtils.Demand(ToggleTreeCompat.NewState, "VFLayer.NewState(string)");
-            ReflectionUtils.Demand(ToggleTreeCompat.StateWithAnimation, "VFState.WithAnimation(Motion)");
-            ReflectionUtils.Demand(VfLayerCompat.RootStateMachineField, "VFLayer.rootStateMachine");
+            ReflectionUtils.Demand(ToggleTreeCompat.StateWithAnimation, "VFState.WithAnimation(VFMotion)");
+            ReflectionUtils.Demand(ToggleTreeCompat.LayerStateMachine, "VFLayer.stateMachine");
+            ReflectionUtils.Demand(ToggleTreeCompat.LayerName, "VFLayer.name");
+            ReflectionUtils.Demand(ToggleTreeCompat.LayerGetId, "VFLayer.GetLayerId()");
+            ReflectionUtils.Demand(ToggleTreeCompat.SmStates, "VFStateMachine.states");
+            ReflectionUtils.Demand(ToggleTreeCompat.StateName, "VFState.name");
+            ReflectionUtils.Demand(ToggleTreeCompat.StateBehaviours, "VFState.behaviours");
+            ReflectionUtils.Demand(ToggleTreeCompat.StateTransitions, "VFState.transitions");
+            ReflectionUtils.Demand(ToggleTreeCompat.StateWriteDefaults, "VFState.writeDefaultValues");
+            ReflectionUtils.Demand(ToggleTreeCompat.TransitionType, "VF.Utils.Controller.VFTransition");
+            ReflectionUtils.Demand(ToggleTreeCompat.TrConditions, "VFTransitionBase.conditions");
+            ReflectionUtils.Demand(ToggleTreeCompat.TrDestinationState, "VFTransitionBase.destinationState");
+            ReflectionUtils.Demand(ToggleTreeCompat.TrHasExitTime, "VFTransition.hasExitTime");
+            ReflectionUtils.Demand(ToggleTreeCompat.TrDuration, "VFTransition.duration");
+            ReflectionUtils.Demand(ToggleTreeCompat.TrHasFixedDuration, "VFTransition.hasFixedDuration");
+            ReflectionUtils.Demand(ToggleTreeCompat.BehavioursAdd, "VFBehaviourContainer.AddBehaviour<T>()");
+            ReflectionUtils.Demand(ToggleTreeCompat.BehavioursGet, "VFBehaviourContainer.GetBehaviours<T>()");
+            ReflectionUtils.Demand(ToggleTreeCompat.TreeCreate, "VFTree.Create(name, type, param, paramY)");
+            ReflectionUtils.Demand(ToggleTreeCompat.TreeChildType, "VF.Utils.Controller.VFTreeChild");
+            ReflectionUtils.Demand(ToggleTreeCompat.TreeAddChild, "VFTree.AddChild(child)");
+            ReflectionUtils.Demand(ToggleTreeCompat.ChildMotion, "VFTreeChild.motion");
+            ReflectionUtils.Demand(ToggleTreeCompat.ChildThreshold, "VFTreeChild.threshold");
+            ReflectionUtils.Demand(ToggleTreeCompat.ChildDirectBlendParameter, "VFTreeChild.directBlendParameter");
+            ReflectionUtils.Demand(ToggleTreeCompat.ControllerGetParam, "VFController.GetParam(string)");
+            driverBehavioursAdd = ToggleTreeCompat.BehavioursAdd
+                .MakeGenericMethod(typeof(VRCAvatarParameterDriver));
+            driverBehavioursGet = ToggleTreeCompat.BehavioursGet
+                .MakeGenericMethod(typeof(VRCAvatarParameterDriver));
 
             var controllerManagerType = ReflectionUtils.FindType("VF.Utils.ControllerManager");
             controllerManagerOne = ReflectionUtils.Demand(
@@ -167,7 +197,6 @@ namespace FuryPlusPlus {
             // ---- gather everything first; throw (failing the build) before any mutation ----
             var controllers = CompressorCompat.LayerServiceControllers.GetValue(layerService);
             var fx = CompressorCompat.GetFx.Invoke(controllers, null);
-            var fxRaw = (AnimatorController)ToggleTreeCompat.GetRaw.Invoke(fx, null);
 
             var batchesObj = CompressorCompat.DecisionGetBatches.Invoke(decision, null);
             var numberBatches = (List<List<VRCExpressionParameters.Parameter>>)
@@ -185,8 +214,12 @@ namespace FuryPlusPlus {
             }
             var latchSendCount = CountIn(numberBatches, num => num != 0) + CountIn(boolBatches, num => num != 0);
 
-            var compressorMachine = FindCompressorMachine(fxRaw);
-            var trueParam = FindTrueParam(fxRaw);
+            var compressorLayer = FindCompressorLayer(fx);
+            var compressorMachine = ToggleTreeCompat.LayerStateMachine.GetValue(compressorLayer);
+            if (compressorMachine == null) {
+                throw new Exception("FuryPlusPlus sub-8-bit packing: Parameter Compressor layer has no states.");
+            }
+            var trueParam = FindTrueParam(fx);
 
             var plans = new List<PairPlan>();
             foreach (var (rep, partner) in pairs) {
@@ -227,15 +260,15 @@ namespace FuryPlusPlus {
                 }
             }
 
-            InsertDecodeStates(compressorMachine, plans, trueParam);
+            InsertDecodeStates(compressorLayer, compressorMachine, plans, trueParam);
 
             var oneParam = GetOneParamName(fx);
             BuildEncodeLayer(fx, plans, oneParam);
-            BuildDecodeLayer(fx, fxRaw, compressorMachine, plans, oneParam);
+            BuildDecodeLayer(fx, compressorLayer, plans, oneParam);
         }
 
         private static PairPlan BuildPlan(
-            AnimatorStateMachine machine,
+            object machine,
             VRCExpressionParameters.Parameter rep,
             VRCExpressionParameters.Parameter partner,
             int batchNum,
@@ -307,17 +340,25 @@ namespace FuryPlusPlus {
 
         // ---- compressor layer surgery helpers ----
 
-        private static AnimatorStateMachine FindCompressorMachine(AnimatorController fxRaw) {
-            var layer = fxRaw.layers.LastOrDefault(l =>
-                l.name != null && l.name.EndsWith("Parameter Compressor") && l.stateMachine != null);
-            if (layer == null) {
+        /** The compressor's own VFLayer, found by name the same way the raw scan did. */
+        private static object FindCompressorLayer(object fx) {
+            object found = null;
+            foreach (var layer in (IEnumerable)ToggleTreeCompat.GetLayers.Invoke(fx, null)) {
+                var name = (string)ToggleTreeCompat.LayerName.GetValue(layer);
+                if (name == null || !name.EndsWith("Parameter Compressor")) continue;
+                if (ToggleTreeCompat.LayerStateMachine.GetValue(layer) == null) continue;
+                found = layer; // last match wins, as before
+            }
+            if (found == null) {
                 throw new Exception("FuryPlusPlus sub-8-bit packing: Parameter Compressor layer not found.");
             }
-            return layer.stateMachine;
+            return found;
         }
 
-        private static string FindTrueParam(AnimatorController fxRaw) {
-            var parameter = fxRaw.parameters.FirstOrDefault(p =>
+        private static string FindTrueParam(object fx) {
+            var parameters = (AnimatorControllerParameter[])
+                ToggleTreeCompat.ControllerParameters.GetValue(fx);
+            var parameter = parameters.FirstOrDefault(p =>
                 ToggleTreeCompat.AlwaysTrueParamName.IsMatch(p.name) && p.defaultBool);
             if (parameter == null) {
                 throw new Exception("FuryPlusPlus sub-8-bit packing: always-true parameter not found.");
@@ -331,13 +372,18 @@ namespace FuryPlusPlus {
                 .Select(i => (syncId & (1 << (indexBitCount - 1 - i))) > 0 ? "1" : "0"));
         }
 
-        private static AnimatorState FindState(AnimatorStateMachine machine, string titleId, bool receive) {
+        private static string StateName(object state) {
+            return (string)ToggleTreeCompat.StateName.GetValue(state);
+        }
+
+        private static object FindState(object machine, string titleId, bool receive) {
             var marker = $"({titleId}):";
-            var matches = machine.states
-                .Select(child => child.state)
-                .Where(state => state != null && state.name.Contains(marker))
-                .Where(state => receive ? state.name.StartsWith("Receive") : state.name.Contains("Send"))
-                .Where(state => !state.name.StartsWith("FPP"))
+            var matches = ToggleConversionRuntime.StatesOf(machine)
+                .Where(state => state != null && StateName(state) != null && StateName(state).Contains(marker))
+                .Where(state => receive
+                    ? StateName(state).StartsWith("Receive")
+                    : StateName(state).Contains("Send"))
+                .Where(state => !StateName(state).StartsWith("FPP"))
                 .ToList();
             if (matches.Count != 1) {
                 throw new Exception($"FuryPlusPlus sub-8-bit packing: expected exactly one " +
@@ -347,11 +393,20 @@ namespace FuryPlusPlus {
             return matches[0];
         }
 
-        private static VRCAvatarParameterDriver SingleDriver(AnimatorState state) {
-            var drivers = state.behaviours.OfType<VRCAvatarParameterDriver>().ToList();
+        /**
+         * The state's one parameter driver. VFBehaviourContainer holds VFBehaviour wrappers,
+         * not StateMachineBehaviours, so the driver has to come out through the typed
+         * accessor — an `OfType<VRCAvatarParameterDriver>()` over the container would compile
+         * and silently match nothing. The instance handed back is the wrapper's own copy, and
+         * Save clones from it, so mutating it here does reach the built controller.
+         */
+        private static VRCAvatarParameterDriver SingleDriver(object state) {
+            var container = ToggleTreeCompat.StateBehaviours.GetValue(state);
+            var drivers = ((IEnumerable)driverBehavioursGet.Invoke(container, null))
+                .Cast<VRCAvatarParameterDriver>().ToList();
             if (drivers.Count != 1) {
                 throw new Exception($"FuryPlusPlus sub-8-bit packing: expected one parameter driver on " +
-                                    $"'{state.name}', found {drivers.Count}.");
+                                    $"'{StateName(state)}', found {drivers.Count}.");
             }
             return drivers[0];
         }
@@ -367,29 +422,43 @@ namespace FuryPlusPlus {
          * layer (which evaluates before this one) has processed the new slot value.
          */
         private static void InsertDecodeStates(
-            AnimatorStateMachine machine,
+            object compressorLayer,
+            object machine,
             List<PairPlan> plans,
             string trueParam
         ) {
             foreach (var group in plans.GroupBy(plan => plan.BatchNum)) {
-                var receiveState = group.First().ReceiveDriver == null
-                    ? null
-                    : machine.states.Select(c => c.state)
-                        .FirstOrDefault(state => state != null
-                                                 && state.behaviours.Contains(group.First().ReceiveDriver));
+                var wanted = group.First().ReceiveDriver;
+                object receiveState = null;
+                if (wanted != null) {
+                    foreach (var state in ToggleConversionRuntime.StatesOf(machine)) {
+                        if (state == null) continue;
+                        var container = ToggleTreeCompat.StateBehaviours.GetValue(state);
+                        var hasIt = ((IEnumerable)driverBehavioursGet.Invoke(container, null))
+                            .Cast<VRCAvatarParameterDriver>()
+                            .Any(driver => ReferenceEquals(driver, wanted));
+                        if (hasIt) { receiveState = state; break; }
+                    }
+                }
                 if (receiveState == null) {
                     throw new Exception("FuryPlusPlus sub-8-bit packing: receive state lookup failed.");
                 }
 
-                var decodeState = Create<AnimatorState>();
-                decodeState.name = $"FPP Apply ({group.Key})";
-                decodeState.writeDefaultValues = receiveState.writeDefaultValues;
-                decodeState.motion = null;
-                machine.states = machine.states
-                    .Concat(new[] { new ChildAnimatorState { state = decodeState } })
-                    .ToArray();
+                // NewState appends to this layer's state machine (and positions it) — the
+                // detached model has no ChildAnimatorState array to rebuild.
+                var decodeState = ReflectionUtils.InvokeUnwrapped(
+                    ToggleTreeCompat.NewState, compressorLayer, new object[] { $"FPP Apply ({group.Key})" });
+                ToggleTreeCompat.StateWriteDefaults.SetValue(
+                    decodeState, ToggleTreeCompat.StateWriteDefaults.GetValue(receiveState));
 
-                var driver = Create<VRCAvatarParameterDriver>();
+                var decodeContainer = ToggleTreeCompat.StateBehaviours.GetValue(decodeState);
+                var addedWrapper = ReflectionUtils.InvokeUnwrapped(
+                    driverBehavioursAdd, decodeContainer, new object[] { null });
+                if (addedWrapper == null) {
+                    throw new Exception("FuryPlusPlus sub-8-bit packing: could not add the decode driver.");
+                }
+                var driver = ((IEnumerable)driverBehavioursGet.Invoke(decodeContainer, null))
+                    .Cast<VRCAvatarParameterDriver>().Single();
                 driver.localOnly = false;
                 foreach (var plan in group) {
                     driver.parameters.Add(new VRC_AvatarParameterDriver.Parameter {
@@ -403,18 +472,27 @@ namespace FuryPlusPlus {
                         name = plan.Partner.name
                     });
                 }
-                decodeState.behaviours = new StateMachineBehaviour[] { driver };
 
-                // Move the receive state's outgoing transitions to the interstitial.
-                var moved = receiveState.transitions;
-                var advance = Create<AnimatorStateTransition>();
-                advance.hasFixedDuration = true;
-                advance.destinationState = decodeState;
-                advance.hasExitTime = false;
-                advance.duration = 0;
-                advance.AddCondition(AnimatorConditionMode.If, 0, trueParam);
-                receiveState.transitions = new[] { advance };
-                decodeState.transitions = moved;
+                // Move the receive state's outgoing transitions to the interstitial. Both
+                // .transitions are live Lists, so this is edit-in-place rather than reassign.
+                var receiveTransitions = (IList)ToggleTreeCompat.StateTransitions.GetValue(receiveState);
+                var decodeTransitions = (IList)ToggleTreeCompat.StateTransitions.GetValue(decodeState);
+                var moved = receiveTransitions.Cast<object>().ToList();
+                receiveTransitions.Clear();
+                foreach (var transition in moved) decodeTransitions.Add(transition);
+
+                var advance = Activator.CreateInstance(
+                    ToggleTreeCompat.TransitionType, nonPublic: true);
+                ToggleTreeCompat.TrHasFixedDuration.SetValue(advance, true);
+                ToggleTreeCompat.TrDestinationState.SetValue(advance, decodeState);
+                ToggleTreeCompat.TrHasExitTime.SetValue(advance, false);
+                ToggleTreeCompat.TrDuration.SetValue(advance, 0f);
+                ToggleTreeCompat.TrConditions.SetValue(advance, new[] {
+                    new AnimatorCondition {
+                        mode = AnimatorConditionMode.If, threshold = 0, parameter = trueParam
+                    }
+                });
+                receiveTransitions.Add(advance);
             }
         }
 
@@ -448,47 +526,48 @@ namespace FuryPlusPlus {
             return (string)ToggleTreeCompat.VfaParamName.Invoke(one, null);
         }
 
-        private static AnimationClip AapClip(string name, params (string Param, float Value)[] curves) {
-            var clip = Create<AnimationClip>();
-            clip.name = name;
+        /** An in-memory VFClip writing one or more AAPs at a constant value. */
+        private static object AapClip(string name, params (string Param, float Value)[] curves) {
+            var clip = ToggleTreeCompat.NewEmptyClip(name);
             foreach (var (param, value) in curves) {
-                // Through VRCFury's clip ext-db so the post-compressor SaveAssets finalizes it.
                 var curve = CompressorCompat.FloatToCurve.Invoke(null, new object[] { value });
-                CompressorCompat.ClipSetAap.Invoke(null, new object[] { clip, param, curve });
+                ReflectionUtils.InvokeUnwrapped(
+                    CompressorCompat.ClipSetAap, clip, new object[] { param, curve });
             }
             return clip;
         }
 
-        private static BlendTree NewTree(string name, BlendTreeType type, string blendParam) {
-            var tree = Create<BlendTree>();
-            tree.name = name;
-            tree.blendType = type;
-            tree.useAutomaticThresholds = false;
-            if (blendParam != null) tree.blendParameter = blendParam;
-            return tree;
+        /** VFTree.Create already sets useAutomaticThresholds/normalizedBlendValues false. */
+        private static object NewTree(string name, BlendTreeType type, string blendParam) {
+            return ToggleTreeCompat.TreeCreate.Invoke(
+                null, new object[] { name, type, blendParam, null });
         }
 
-        // tree.children round-trips the native array per assignment, so children are
-        // accumulated in a list and assigned exactly once per tree.
-        private static ChildMotion Child(Motion motion, float threshold, string directParam) {
-            var child = new ChildMotion { motion = motion, timeScale = 1, threshold = threshold };
-            if (directParam != null) child.directBlendParameter = directParam;
+        private static object Child(object motion, float threshold, string directParam) {
+            var child = Activator.CreateInstance(ToggleTreeCompat.TreeChildType);
+            ToggleTreeCompat.ChildMotion.SetValue(child, motion);
+            ToggleTreeCompat.ChildThreshold.SetValue(child, threshold);
+            if (directParam != null) {
+                ToggleTreeCompat.ChildDirectBlendParameter.SetValue(child, directParam);
+            }
             return child;
         }
 
+        private static void AddChild(object tree, object child) {
+            ReflectionUtils.InvokeUnwrapped(ToggleTreeCompat.TreeAddChild, tree, new[] { child });
+        }
+
         /** 32-child plateau step tree: quantizes source into contribution*index on the AAP. */
-        private static BlendTree StepTree(string sourceParam, string aap, float contributionPerIndex) {
+        private static object StepTree(string sourceParam, string aap, float contributionPerIndex) {
             var tree = NewTree($"FPP Sub8 quantize {sourceParam}", BlendTreeType.Simple1D, sourceParam);
             const float epsilon = 1e-4f;
-            var children = new List<ChildMotion>(32);
             for (var k = 0; k <= 15; k++) {
                 var clip = AapClip($"{aap} = {k}", (aap, k * contributionPerIndex));
                 var start = k == 0 ? -1f : Boundary(k);
                 var end = k == 15 ? 1f : Boundary(k + 1) - epsilon;
-                children.Add(Child(clip, start, null));
-                children.Add(Child(clip, end, null));
+                AddChild(tree, Child(clip, start, null));
+                AddChild(tree, Child(clip, end, null));
             }
-            tree.children = children.ToArray();
             return tree;
         }
 
@@ -499,52 +578,45 @@ namespace FuryPlusPlus {
                 ToggleTreeCompat.NewState, layer, new object[] { "DBT" });
             var root = NewTree("DBT", BlendTreeType.Direct, null);
             ReflectionUtils.InvokeUnwrapped(
-                ToggleTreeCompat.StateWithAnimation, state, new object[] { (Motion)root });
+                ToggleTreeCompat.StateWithAnimation, state, new[] { root });
             return root;
         }
 
         private static void BuildEncodeLayer(object fx, List<PairPlan> plans, string oneParam) {
-            var root = (BlendTree)NewDbtLayer(fx, "FuryPlusPlus Sub8 Encode", -1);
-            var children = new List<ChildMotion>(plans.Count * 2);
+            var root = NewDbtLayer(fx, "FuryPlusPlus Sub8 Encode", -1);
             foreach (var plan in plans) {
                 // Two step trees summing into the packed AAP: hi*16 + lo.
-                children.Add(Child(StepTree(plan.Rep.name, plan.PackedAap, 16f), 0, oneParam));
-                children.Add(Child(StepTree(plan.Partner.name, plan.PackedAap, 1f), 0, oneParam));
+                AddChild(root, Child(StepTree(plan.Rep.name, plan.PackedAap, 16f), 0, oneParam));
+                AddChild(root, Child(StepTree(plan.Partner.name, plan.PackedAap, 1f), 0, oneParam));
             }
-            root.children = children.ToArray();
         }
 
         private static void BuildDecodeLayer(
             object fx,
-            AnimatorController fxRaw,
-            AnimatorStateMachine compressorMachine,
+            object compressorLayer,
             List<PairPlan> plans,
             string oneParam
         ) {
             // Must evaluate BEFORE the compressor layer so decoded AAPs are fresh by the
             // time the interstitial state's driver fires (one frame after slot arrival).
-            var compressorIndex = Array.FindIndex(fxRaw.layers,
-                layer => layer.stateMachine == compressorMachine);
-            if (compressorIndex < 0) compressorIndex = fxRaw.layers.Length;
+            var compressorIndex = (int)ReflectionUtils.InvokeUnwrapped(
+                ToggleTreeCompat.LayerGetId, compressorLayer, null);
+            if (compressorIndex < 0) compressorIndex = -1;
 
-            var root = (BlendTree)NewDbtLayer(fx, "FuryPlusPlus Sub8 Decode", compressorIndex);
-            var rootChildren = new List<ChildMotion>(plans.Count);
+            var root = NewDbtLayer(fx, "FuryPlusPlus Sub8 Decode", compressorIndex);
             foreach (var plan in plans) {
                 var decode = NewTree($"FPP Sub8 decode {plan.SlotParamName}",
                     BlendTreeType.Simple1D, plan.SlotParamName);
-                var decodeChildren = new List<ChildMotion>(256);
                 for (var value = 0; value <= 255; value++) {
                     var clip = AapClip(
                         $"decode {value}",
                         (plan.HiOutAap, DecodeValue(value >> 4)),
                         (plan.LoOutAap, DecodeValue(value & 15))
                     );
-                    decodeChildren.Add(Child(clip, value, null));
+                    AddChild(decode, Child(clip, value, null));
                 }
-                decode.children = decodeChildren.ToArray();
-                rootChildren.Add(Child(decode, 0, oneParam));
+                AddChild(root, Child(decode, 0, oneParam));
             }
-            root.children = rootChildren.ToArray();
         }
     }
 }

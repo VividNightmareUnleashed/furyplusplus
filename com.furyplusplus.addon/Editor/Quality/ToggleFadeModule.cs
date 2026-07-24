@@ -57,7 +57,7 @@ namespace FuryPlusPlus {
 
         private sealed class Match {
             internal ToggleConversionRuntime.Entry Entry;
-            internal AnimatorState OnState;
+            internal object OnState;   // VFState
             internal AnimatorCondition OnCondition;
             internal float FadeSeconds;
         }
@@ -95,10 +95,9 @@ namespace FuryPlusPlus {
                     Log.Info($"Skipped {skippedAsymmetric} fade toggle(s) with asymmetric in/out times " +
                              "(not converted; stock layers kept).");
                 }
-                if (converted.Count > 0 || skippedAsymmetric > 0) {
-                    LastStats = $"converted={converted.Count}, skippedAsymmetric={skippedAsymmetric}";
-                    LastConverted = converted.Count;
-                }
+                LastConverted = converted.Count;
+                LastStats = $"converted={converted.Count} skippedAsymmetric={skippedAsymmetric} " +
+                            $"({ToggleConversionRuntime.LastSnapshotSummary})";
             } catch (System.Exception e) {
                 Log.Warn("Fade toggle conversion skipped: " + e.Message);
             }
@@ -109,75 +108,101 @@ namespace FuryPlusPlus {
             ToggleConversionRuntime.Entry entry,
             ref int skippedAsymmetric
         ) {
-            var machine = entry.Machine;
-            if (machine == null || machine.states.Length != 4) return null;
+            var machine = entry.StateMachine;
+            if (machine == null) return null;
+            var states = ToggleConversionRuntime.StatesOf(machine);
+            if (states.Count != 4) return null;
             if (!ToggleConversionRuntime.PassesCommonLayerGuards(snapshot, entry)) return null;
-
-            var states = machine.states.Select(child => child.state).ToArray();
 
             // Off is the effective entry state. Default-on toggles make On the default state
             // and add a single unconditional entry transition to Off (ToggleBuilder shape).
-            AnimatorState off;
-            var entryTransitions = machine.entryTransitions;
-            if (entryTransitions.Length == 0) {
-                off = machine.defaultState;
-            } else if (entryTransitions.Length == 1
-                       && entryTransitions[0].conditions.Length == 0
-                       && entryTransitions[0].destinationState != null) {
-                off = entryTransitions[0].destinationState;
+            object off;
+            var entryTransitions = new List<object>();
+            foreach (var transition in (System.Collections.IEnumerable)
+                     ToggleTreeCompat.SmEntryTransitions.GetValue(machine)) {
+                entryTransitions.Add(transition);
+            }
+            if (entryTransitions.Count == 0) {
+                off = ToggleTreeCompat.SmDefaultState.GetValue(machine);
+            } else if (entryTransitions.Count == 1
+                       && ToggleConversionRuntime.ConditionsOf(entryTransitions[0]).Length == 0
+                       && ToggleConversionRuntime.DestinationOf(entryTransitions[0]) != null) {
+                off = ToggleConversionRuntime.DestinationOf(entryTransitions[0]);
             } else {
                 return null;
             }
-            if (off == null || !states.Contains(off) || off.motion != null) return null;
+            if (off == null
+                || !states.Any(state => ReferenceEquals(state, off))
+                || ToggleConversionRuntime.MotionOf(off) != null) return null;
 
             // Off → In on the toggle param.
-            if (off.transitions.Length != 1) return null;
-            var toIn = off.transitions[0];
-            if (toIn.isExit || toIn.hasExitTime || toIn.duration != 0) return null;
-            if (toIn.conditions.Length != 1) return null;
-            var onCondition = toIn.conditions[0];
+            var offTransitions = ToggleConversionRuntime.TransitionsOf(off);
+            if (offTransitions.Count != 1) return null;
+            var toIn = offTransitions[0];
+            if (ToggleConversionRuntime.IsExit(toIn)
+                || ToggleConversionRuntime.HasExitTime(toIn)
+                || ToggleConversionRuntime.DurationOf(toIn) != 0) return null;
+            var toInConditions = ToggleConversionRuntime.ConditionsOf(toIn);
+            if (toInConditions.Length != 1) return null;
+            var onCondition = toInConditions[0];
             if (onCondition.mode != AnimatorConditionMode.If) return null;
             var parameter = ToggleConversionRuntime.FindParam(snapshot, onCondition.parameter);
             if (parameter == null || parameter.type != AnimatorControllerParameterType.Bool) return null;
-            var inState = toIn.destinationState;
-            if (inState == null || inState == off) return null;
-            if (ToggleConversionRuntime.MotionHasValidBinding(snapshot, inState.motion)) return null; // pure crossfade only
+            var inState = ToggleConversionRuntime.DestinationOf(toIn);
+            if (inState == null || ReferenceEquals(inState, off)) return null;
+            // pure crossfade only
+            if (ToggleConversionRuntime.MotionHasValidBinding(
+                    snapshot, ToggleConversionRuntime.MotionOf(inState))) return null;
 
             // In → On unconditionally ("always" param), blending over the fade-in time.
-            if (inState.transitions.Length != 1) return null;
-            var toOn = inState.transitions[0];
-            if (toOn.isExit || toOn.hasExitTime) return null;
-            if (!IsAlwaysCondition(snapshot, toOn.conditions)) return null;
-            var onState = toOn.destinationState;
-            if (onState == null || onState == off || onState == inState) return null;
-            var fadeIn = toOn.duration;
+            var inTransitions = ToggleConversionRuntime.TransitionsOf(inState);
+            if (inTransitions.Count != 1) return null;
+            var toOn = inTransitions[0];
+            if (ToggleConversionRuntime.IsExit(toOn) || ToggleConversionRuntime.HasExitTime(toOn)) return null;
+            if (!IsAlwaysCondition(snapshot, ToggleConversionRuntime.ConditionsOf(toOn))) return null;
+            var onState = ToggleConversionRuntime.DestinationOf(toOn);
+            if (onState == null
+                || ReferenceEquals(onState, off)
+                || ReferenceEquals(onState, inState)) return null;
+            var fadeIn = ToggleConversionRuntime.DurationOf(toOn);
 
-            if (!ToggleConversionRuntime.MotionIsStatic(onState.motion)) return null;
-            if (!ToggleConversionRuntime.MotionHasValidBinding(snapshot, onState.motion)) return null;
-            if (!ToggleConversionRuntime.MotionIsPlainFloat(onState.motion)) return null;
+            var onMotion = ToggleConversionRuntime.MotionOf(onState);
+            if (!ToggleConversionRuntime.MotionIsStatic(onMotion)) return null;
+            if (!ToggleConversionRuntime.MotionHasValidBinding(snapshot, onMotion)) return null;
+            if (!ToggleConversionRuntime.MotionIsPlainFloat(onMotion)) return null;
 
             // On → Out when the param drops, blending over the fade-out time.
-            if (onState.transitions.Length != 1) return null;
-            var toOut = onState.transitions[0];
-            if (toOut.isExit || toOut.hasExitTime) return null;
-            if (toOut.conditions.Length != 1) return null;
+            var onTransitions = ToggleConversionRuntime.TransitionsOf(onState);
+            if (onTransitions.Count != 1) return null;
+            var toOut = onTransitions[0];
+            if (ToggleConversionRuntime.IsExit(toOut) || ToggleConversionRuntime.HasExitTime(toOut)) return null;
+            var toOutConditions = ToggleConversionRuntime.ConditionsOf(toOut);
+            if (toOutConditions.Length != 1) return null;
             var negated = ToggleConversionRuntime.Negate(onCondition);
-            if (negated == null || !ToggleConversionRuntime.ConditionsEqual(toOut.conditions[0], negated.Value)) {
+            if (negated == null || !ToggleConversionRuntime.ConditionsEqual(toOutConditions[0], negated.Value)) {
                 return null;
             }
-            var outState = toOut.destinationState;
-            if (outState == null || outState == off || outState == inState || outState == onState) return null;
-            var fadeOut = toOut.duration;
+            var outState = ToggleConversionRuntime.DestinationOf(toOut);
+            if (outState == null
+                || ReferenceEquals(outState, off)
+                || ReferenceEquals(outState, inState)
+                || ReferenceEquals(outState, onState)) return null;
+            var fadeOut = ToggleConversionRuntime.DurationOf(toOut);
 
             // Out → exit unconditionally, instantly.
-            if (ToggleConversionRuntime.MotionHasValidBinding(snapshot, outState.motion)) return null;
-            if (outState.transitions.Length != 1) return null;
-            var toExit = outState.transitions[0];
-            if (!toExit.isExit || toExit.hasExitTime || toExit.duration != 0) return null;
-            if (!IsAlwaysCondition(snapshot, toExit.conditions)) return null;
+            if (ToggleConversionRuntime.MotionHasValidBinding(
+                    snapshot, ToggleConversionRuntime.MotionOf(outState))) return null;
+            var outTransitions = ToggleConversionRuntime.TransitionsOf(outState);
+            if (outTransitions.Count != 1) return null;
+            var toExit = outTransitions[0];
+            if (!ToggleConversionRuntime.IsExit(toExit)
+                || ToggleConversionRuntime.HasExitTime(toExit)
+                || ToggleConversionRuntime.DurationOf(toExit) != 0) return null;
+            if (!IsAlwaysCondition(snapshot, ToggleConversionRuntime.ConditionsOf(toExit))) return null;
 
             // Default-on variant must point its default state at On.
-            if (entryTransitions.Length == 1 && machine.defaultState != onState) return null;
+            if (entryTransitions.Count == 1
+                && !ReferenceEquals(ToggleTreeCompat.SmDefaultState.GetValue(machine), onState)) return null;
 
             if (System.Math.Abs(fadeIn - fadeOut) > 0.001f) {
                 skippedAsymmetric++;
@@ -231,11 +256,12 @@ namespace FuryPlusPlus {
                 blendParam = (string)ToggleTreeCompat.VfaParamName.Invoke(smoothed, null);
             }
 
-            var onFrame = ToggleConversionRuntime.LastFrameOrEmpty(match.OnState.motion, $"{layerName} (on)");
+            var onFrame = ToggleConversionRuntime.LastFrameOrEmpty(
+                ToggleConversionRuntime.MotionOf(match.OnState), $"{layerName} (on)");
             var fadeTree = ToggleTreeCompat.Tree1DCreate.Invoke(
                 null, new object[] { $"{layerName} fade", blendParam });
             ToggleTreeCompat.Tree1DAdd.Invoke(fadeTree,
-                new object[] { 0f, (Motion)ToggleTreeCompat.NewEmptyClip($"{layerName} (off)") });
+                new object[] { 0f, ToggleTreeCompat.NewEmptyClip($"{layerName} (off)") });
             ToggleTreeCompat.Tree1DAdd.Invoke(fadeTree, new object[] { 1f, onFrame });
             ToggleTreeCompat.DirectAddOne.Invoke(dbt, new object[] { ToggleTreeCompat.TreeToMotion(fadeTree) });
         }

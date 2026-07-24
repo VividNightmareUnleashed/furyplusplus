@@ -53,8 +53,8 @@ namespace FuryPlusPlus {
 
         private sealed class Match {
             internal ToggleConversionRuntime.Entry Entry;
-            internal AnimatorState LocalState;
-            internal AnimatorState RemoteState;
+            internal object LocalState;   // VFState
+            internal object RemoteState;  // VFState
             internal AnimatorCondition OnCondition;
         }
 
@@ -80,11 +80,11 @@ namespace FuryPlusPlus {
                     converted.Add(entry.Name);
                 }
 
+                LastConverted = converted.Count;
+                LastStats = $"converted={converted.Count} ({ToggleConversionRuntime.LastSnapshotSummary})";
                 if (converted.Count > 0) {
                     Log.Info($"Converted {converted.Count} separate-local toggle layer(s) to blendtree: " +
                              string.Join(", ", converted));
-                    LastStats = $"converted={converted.Count}";
-                    LastConverted = converted.Count;
                 }
             } catch (System.Exception e) {
                 Log.Warn("Separate-local toggle conversion skipped: " + e.Message);
@@ -92,28 +92,34 @@ namespace FuryPlusPlus {
         }
 
         private static Match TryMatch(ToggleConversionRuntime.Snapshot snapshot, ToggleConversionRuntime.Entry entry) {
-            var machine = entry.Machine;
-            if (machine == null || machine.states.Length != 3) return null;
-            if (machine.entryTransitions.Length != 0) return null;
+            var machine = entry.StateMachine;
+            if (machine == null) return null;
+            var states = ToggleConversionRuntime.StatesOf(machine);
+            if (states.Count != 3) return null;
+            if (ToggleConversionRuntime.CountOf(
+                    ToggleTreeCompat.SmEntryTransitions.GetValue(machine)) != 0) return null;
             if (!ToggleConversionRuntime.PassesCommonLayerGuards(snapshot, entry)) return null;
 
-            var states = machine.states.Select(child => child.state).ToArray();
-            var off = machine.defaultState;
-            if (off == null || !states.Contains(off)) return null;
-            if (off.motion != null) return null;
+            var off = ToggleTreeCompat.SmDefaultState.GetValue(machine);
+            if (off == null || !states.Any(state => ReferenceEquals(state, off))) return null;
+            if (ToggleConversionRuntime.MotionOf(off) != null) return null;
 
             // Off must branch to both on-states, each gated on the shared param + IsLocal.
-            var offTransitions = off.transitions;
-            if (offTransitions.Length != 2) return null;
-            var branches = new List<(AnimatorState Destination, AnimatorCondition On, AnimatorCondition IsLocal)>();
+            var offTransitions = ToggleConversionRuntime.TransitionsOf(off);
+            if (offTransitions.Count != 2) return null;
+            var branches = new List<(object Destination, AnimatorCondition On, AnimatorCondition IsLocal)>();
             foreach (var transition in offTransitions) {
-                if (transition.isExit || transition.hasExitTime || transition.duration != 0) return null;
-                if (transition.destinationState == null || transition.destinationState == off) return null;
-                if (transition.conditions.Length != 2) return null;
-                var isLocalConditions = transition.conditions.Where(IsIsLocalCondition).ToArray();
-                var otherConditions = transition.conditions.Where(c => !IsIsLocalCondition(c)).ToArray();
+                if (ToggleConversionRuntime.IsExit(transition)
+                    || ToggleConversionRuntime.HasExitTime(transition)
+                    || ToggleConversionRuntime.DurationOf(transition) != 0) return null;
+                var destination = ToggleConversionRuntime.DestinationOf(transition);
+                if (destination == null || ReferenceEquals(destination, off)) return null;
+                var conditions = ToggleConversionRuntime.ConditionsOf(transition);
+                if (conditions.Length != 2) return null;
+                var isLocalConditions = conditions.Where(IsIsLocalCondition).ToArray();
+                var otherConditions = conditions.Where(c => !IsIsLocalCondition(c)).ToArray();
                 if (isLocalConditions.Length != 1 || otherConditions.Length != 1) return null;
-                branches.Add((transition.destinationState, otherConditions[0], isLocalConditions[0]));
+                branches.Add((destination, otherConditions[0], isLocalConditions[0]));
             }
             if (branches[0].Destination == branches[1].Destination) return null;
             if (!ToggleConversionRuntime.ConditionsEqual(branches[0].On, branches[1].On)) return null;
@@ -140,16 +146,20 @@ namespace FuryPlusPlus {
             // Each on-state exits on exactly ¬(param ∧ isLocalSide): two single-condition exits.
             foreach (var branch in branches) {
                 var state = branch.Destination;
-                if (state.motion != null && !ToggleConversionRuntime.MotionIsStatic(state.motion)) return null;
-                var exits = state.transitions;
-                if (exits.Length != 2) return null;
-                if (exits.Any(t => !t.isExit || t.hasExitTime || t.duration != 0 || t.conditions.Length != 1)) {
+                var motion = ToggleConversionRuntime.MotionOf(state);
+                if (motion != null && !ToggleConversionRuntime.MotionIsStatic(motion)) return null;
+                var exits = ToggleConversionRuntime.TransitionsOf(state);
+                if (exits.Count != 2) return null;
+                if (exits.Any(t => !ToggleConversionRuntime.IsExit(t)
+                                   || ToggleConversionRuntime.HasExitTime(t)
+                                   || ToggleConversionRuntime.DurationOf(t) != 0
+                                   || ToggleConversionRuntime.ConditionsOf(t).Length != 1)) {
                     return null;
                 }
                 var negatedOn = ToggleConversionRuntime.Negate(branch.On);
                 var negatedLocal = ToggleConversionRuntime.Negate(branch.IsLocal);
                 if (negatedOn == null || negatedLocal == null) return null;
-                var exitConditions = exits.Select(t => t.conditions[0]).ToArray();
+                var exitConditions = exits.Select(t => ToggleConversionRuntime.ConditionsOf(t)[0]).ToArray();
                 var matchesNegation =
                     (ToggleConversionRuntime.ConditionsEqual(exitConditions[0], negatedOn.Value)
                      && ToggleConversionRuntime.ConditionsEqual(exitConditions[1], negatedLocal.Value))
@@ -158,8 +168,10 @@ namespace FuryPlusPlus {
                 if (!matchesNegation) return null;
             }
 
-            if (!ToggleConversionRuntime.MotionHasValidBinding(snapshot, local.Destination.motion)
-                && !ToggleConversionRuntime.MotionHasValidBinding(snapshot, remote.Destination.motion)) {
+            if (!ToggleConversionRuntime.MotionHasValidBinding(
+                    snapshot, ToggleConversionRuntime.MotionOf(local.Destination))
+                && !ToggleConversionRuntime.MotionHasValidBinding(
+                    snapshot, ToggleConversionRuntime.MotionOf(remote.Destination))) {
                 return null;
             }
             if (ToggleConversionRuntime.SharesBindingsWithHigherLayer(snapshot, entry)) return null;
@@ -181,9 +193,9 @@ namespace FuryPlusPlus {
         private static void Convert(Match match, object dbt) {
             var layerName = match.Entry.Name;
             var remoteMotion = ToggleConversionRuntime.LastFrameOrEmpty(
-                match.RemoteState.motion, $"{layerName} (remote off)");
+                ToggleConversionRuntime.MotionOf(match.RemoteState), $"{layerName} (remote off)");
             var localMotion = ToggleConversionRuntime.LastFrameOrEmpty(
-                match.LocalState.motion, $"{layerName} (local off)");
+                ToggleConversionRuntime.MotionOf(match.LocalState), $"{layerName} (local off)");
 
             var selector = ToggleTreeCompat.Tree1DCreate.Invoke(
                 null, new object[] { $"{layerName} local/remote", "IsLocal" });

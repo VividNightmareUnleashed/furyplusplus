@@ -2,7 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using HarmonyLib;
-using UnityEditor;
+using UnityEditor.Animations;
 using UnityEngine;
 
 namespace FuryPlusPlus {
@@ -18,9 +18,17 @@ namespace FuryPlusPlus {
      * The global no-op strip already handles off clips whose bindings nothing else writes;
      * this covers the remaining case where the SAME layer's on-clip animates them. The
      * "constant write at rest" rules themselves are NoOpCurveStripPass.IsConstant/
-     * ValuesMatch — one doctrine for both modules. Requires the layer-to-tree binding
-     * index module (it publishes which candidate layer is being converted); silently
-     * inactive without it.
+     * ValuesMatch — one doctrine for both modules.
+     *
+     * As of VRCFury 1.1382 LayerToTreeService.Apply builds the per-layer binding index and
+     * the reverse binding→layers map itself and threads both into OptimizeLayer, so this
+     * module reads them off the call instead of walking every FX layer up front. Only the
+     * non-FX conflict scan is still ours — those controllers are outside the maps.
+     *
+     * Note ClipFactoryService is [VFPrototypeScope]: it cannot be resolved as a singleton
+     * from the injector, because the clip names it mints depend on which builder asked for
+     * it. That is why the off side is nulled rather than replaced — Optimize then fills it
+     * from its own correctly parented factory.
      */
     internal sealed class OffSideEliminationModule : Module<OffSideEliminationModule> {
         internal override string Id => "offSideElimination";
@@ -30,8 +38,7 @@ namespace FuryPlusPlus {
         internal override string SettingsGroup => "Animator layers";
         internal override string Description =>
             "Converts blendtree toggles whose off state only writes resting values to the " +
-            "one-sided form — no per-frame writes while the toggle is off. Requires the " +
-            "layer-to-tree binding index module.";
+            "one-sided form — no per-frame writes while the toggle is off.";
 
         internal override void Install(Harmony harmony, VrcfuryCompat compat) {
             OffSideEliminationPatch.Install(harmony, compat);
@@ -53,41 +60,57 @@ namespace FuryPlusPlus {
         internal static string LastStats;
         internal static int LastUpgraded;
 
-        private static System.Reflection.MethodInfo getEmptyClip;
-
-        // Rebuilt at the LayerToTree boundary each run; null outside it.
-        [ThreadStatic] private static HashSet<EditorCurveBinding> conflictingBindings;
-        [ThreadStatic] private static Dictionary<EditorCurveBinding, int> fxWriterLayerCount;
-        [ThreadStatic] private static AnimationClip emptyClip;
+        // Rebuilt at the LayerToTree boundary each run; null outside it. Non-null doubles as
+        // the "module enabled and context healthy" signal for the hot prefixes.
+        [ThreadStatic] private static HashSet<object> conflictingBindings;
+        [ThreadStatic] private static object defaultLayer;
         [ThreadStatic] private static int upgraded;
+        // Off-sides we actually got to look at, and layers VRCFury got as far as converting.
+        // Without these, "0 upgrades" is ambiguous between "nothing was eligible" and "the
+        // patch never ran".
+        [ThreadStatic] private static int considered;
+        [ThreadStatic] private static int layersSeen;
+
+        // Captured per OptimizeLayer call, straight off VRCFury's own arguments.
+        [ThreadStatic] private static object currentLayer;
+        [ThreadStatic] private static IDictionary layersByBinding;
 
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
             var serviceType = ReflectionUtils.Demand(
                 ReflectionUtils.FindType("VF.Service.LayerToTreeService"), "VF.Service.LayerToTreeService");
-            var clipFactoryType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Service.ClipFactoryService"), "VF.Service.ClipFactoryService");
 
             ClipCurveCompat.DemandCore();
-            ReflectionUtils.Demand(ClipCurveCompat.ClipsFromController, "AnimatorIterator.Clips.From(VFController)");
-            ReflectionUtils.Demand(ClipCurveCompat.GetAllBindings, "AnimationClipExtensions.GetAllBindings(clip)");
+            ReflectionUtils.Demand(ClipCurveCompat.ClipGetAllCurves, "VFClip.GetAllCurves()");
+            ReflectionUtils.Demand(ClipCurveCompat.BindingNormalize, "VFBinding.Normalize(combineRotation)");
+            ReflectionUtils.Demand(ClipCurveCompat.BindingTryGetCurrentFloat,
+                "VFBinding.TryGetCurrentFloat(root, out value)");
 
             ToggleTreeCompat.EnsureResolved();
             ReflectionUtils.Demand(ToggleTreeCompat.GetFx, "ControllersService.GetFx()");
-            ReflectionUtils.Demand(ToggleTreeCompat.GetLayers, "VFController.GetLayers()");
-            ReflectionUtils.Demand(ToggleTreeCompat.GetBindingsAnimatedInLayer,
-                "LayerToTreeService.GetBindingsAnimatedInLayer(VFLayer)");
             ReflectionUtils.Demand(ToggleTreeCompat.GetDefaultLayer, "FixWriteDefaultsService.GetDefaultLayer()");
 
-            getEmptyClip = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(clipFactoryType, "GetEmptyClip",
-                    method => method.GetParameters().Length == 0),
-                "ClipFactoryService.GetEmptyClip()");
+            // OptimizeLayer(layer, bindingsByLayer, layersByBinding, directTree)
+            var optimizeLayer = ReflectionUtils.Demand(
+                ReflectionUtils.FindUniqueMethod(serviceType, "OptimizeLayer",
+                    method => method.GetParameters().Length == 4),
+                "LayerToTreeService.OptimizeLayer(layer, bindingsByLayer, layersByBinding, tree)");
+            if (!typeof(IDictionary).IsAssignableFrom(optimizeLayer.GetParameters()[2].ParameterType)) {
+                throw new InvalidOperationException("layersByBinding is not a dictionary");
+            }
 
+            // Optimize(condition, on, off, directTree)
             var optimize = ReflectionUtils.Demand(
                 ReflectionUtils.FindUniqueMethod(serviceType, "Optimize",
                     method => method.GetParameters().Length == 4),
                 "LayerToTreeService.Optimize(condition, on, off, tree)");
-            if (!typeof(Motion).IsAssignableFrom(optimize.GetParameters()[2].ParameterType)) {
+            // (AnimatorCondition, VFMotion on, VFMotion off, …) — the condition drives which
+            // of the two motions survives normalization as the off side, so its type matters
+            // as much as the motions'.
+            var optimizeParams = optimize.GetParameters();
+            var motionType = ClipCurveCompat.ClipType.BaseType;
+            if (optimizeParams[0].ParameterType != typeof(AnimatorCondition)
+                || optimizeParams[1].ParameterType != motionType
+                || optimizeParams[2].ParameterType != motionType) {
                 throw new InvalidOperationException("target signature mismatch");
             }
 
@@ -95,110 +118,156 @@ namespace FuryPlusPlus {
                 _ => PrepareForRun());
 
             harmony.Patch(
+                optimizeLayer,
+                prefix: new HarmonyMethod(typeof(OffSideEliminationPatch), nameof(OptimizeLayerPrefix)),
+                finalizer: new HarmonyMethod(typeof(OffSideEliminationPatch), nameof(OptimizeLayerFinalizer))
+            );
+            harmony.Patch(
                 optimize,
                 prefix: new HarmonyMethod(typeof(OffSideEliminationPatch), nameof(OptimizePrefix))
             );
         }
 
-        /** Builds the cross-layer conflict data once per build, just before LayerToTree runs. */
+        /**
+         * Builds the cross-controller conflict data once per build, just before LayerToTree
+         * runs. Only non-FX controllers are scanned here — VRCFury indexes the FX layers
+         * itself and hands us the result per layer.
+         */
         private static void PrepareForRun() {
             conflictingBindings = null;
-            fxWriterLayerCount = null;
-            emptyClip = null;
+            defaultLayer = null;
+            currentLayer = null;
+            layersByBinding = null;
             upgraded = 0;
+            considered = 0;
+            layersSeen = 0;
+            LastUpgraded = 0;
+            LastStats = null;
             if (OffSideEliminationModule.Instance?.Enabled != true) return;
 
             var controllersService = BuildPhaseHooks.GetService("VF.Service.ControllersService");
-            var clipFactory = BuildPhaseHooks.GetService("VF.Service.ClipFactoryService");
-            var layerToTree = BuildPhaseHooks.GetService("VF.Service.LayerToTreeService");
             var fixWd = BuildPhaseHooks.GetService("VF.Service.FixWriteDefaultsService");
-            if (controllersService == null || clipFactory == null || layerToTree == null || fixWd == null) return;
+            if (controllersService == null || fixWd == null) {
+                LastStats = "no services: "
+                            + (controllersService == null ? "controllers " : "")
+                            + (fixWd == null ? "fixWd" : "");
+                return;
+            }
 
             try {
                 // Bindings animated by NON-FX controllers always conflict (they must keep
                 // their own timing/override semantics).
-                var conflicts = new HashSet<EditorCurveBinding>();
+                var conflicts = new HashSet<object>();
                 var fx = ToggleTreeCompat.GetFx.Invoke(controllersService, null);
-                foreach (var manager in (IEnumerable)ClipCurveCompat.GetAllUsedControllers
-                             .Invoke(controllersService, null)) {
+                foreach (var manager in ClipCurveCompat.UsedControllers(controllersService)) {
                     if (ReferenceEquals(manager, fx)) continue;
-                    foreach (var clipObj in ClipCurveCompat.ClipsFrom(manager)) {
-                        if (!(clipObj is AnimationClip clip)) continue;
-                        foreach (EditorCurveBinding binding in
-                                 (Array)ClipCurveCompat.GetAllBindings.Invoke(null, new object[] { clip })) {
-                            conflicts.Add(binding);
+                    foreach (var clip in ClipCurveCompat.ClipsFrom(manager)) {
+                        if (clip == null) continue;
+                        foreach (var binding in ClipCurveCompat.AllBindingsOf(clip)) {
+                            conflicts.Add(ClipCurveCompat.Normalize(binding, true));
                         }
                     }
                 }
 
-                // How many FX layers write each binding — the defaults layer excluded (its
-                // writes are rest values by construction, which is exactly what one-sided
-                // conversion substitutes). A binding is one-sided-safe only when its sole
-                // FX writer is the candidate layer itself: stock two-sided conversion
-                // writes rest OVER lower-priority layers while off; one-sided must not
-                // change that, so any other writer keeps the two-sided form. Counts are
-                // computed pre-pass and only ever over-count as layers convert — safe.
-                var writerCount = new Dictionary<EditorCurveBinding, int>();
-                var defaultLayer = ToggleTreeCompat.GetDefaultLayer.Invoke(fixWd, null);
-                foreach (var layer in (IEnumerable)ToggleTreeCompat.GetLayers.Invoke(fx, null)) {
-                    if (defaultLayer != null && defaultLayer.Equals(layer)) continue;
-                    var bindings = (IEnumerable)ReflectionUtils.InvokeUnwrapped(
-                        ToggleTreeCompat.GetBindingsAnimatedInLayer, layerToTree, new[] { layer });
-                    foreach (EditorCurveBinding binding in bindings) {
-                        writerCount.TryGetValue(binding, out var count);
-                        writerCount[binding] = count + 1;
-                    }
-                }
-
                 conflictingBindings = conflicts;
-                fxWriterLayerCount = writerCount;
-                emptyClip = getEmptyClip.Invoke(clipFactory, null) as AnimationClip;
+                defaultLayer = ToggleTreeCompat.GetDefaultLayer.Invoke(fixWd, null);
+                LastStats = "armed, no candidate layers";
             } catch (Exception e) {
                 conflictingBindings = null;
-                fxWriterLayerCount = null;
-                emptyClip = null;
+                defaultLayer = null;
                 Log.Warn("Off-side elimination fell back to VRCFury: " + e.Message);
             }
         }
 
-        // __2 is the off-side motion; replacing it with an empty clip routes VRCFury's own
-        // code down its existing one-sided branch. The ThreadStatic context doubles as the
-        // enabled signal — PrepareForRun leaves it null when the module is off.
-        private static void OptimizePrefix(ref Motion __2) {
-            if (conflictingBindings == null || emptyClip == null) return;
-            var candidateBindings = LayerToTreeBindingIndexPatch.CurrentCandidateBindings;
-            if (candidateBindings == null) return; // stock loop running — no layer context
+        // __0 is the layer being converted, __2 the binding→layers reverse index. Both stay
+        // live only for the duration of this one OptimizeLayer call.
+        private static void OptimizeLayerPrefix(object __0, object __2) {
+            currentLayer = __0;
+            layersByBinding = __2 as IDictionary;
+            if (conflictingBindings == null) return;
+            layersSeen++;
+            LastStats = $"candidateLayers={layersSeen} offSidesChecked={considered} oneSided={upgraded}";
+        }
+
+        private static Exception OptimizeLayerFinalizer(Exception __exception) {
+            currentLayer = null;
+            layersByBinding = null;
+            return __exception;
+        }
+
+        /**
+         * Nulls out the off-side motion, which routes VRCFury's own code down its existing
+         * one-sided branch: Optimize fills a null side from its (prototype-scoped, correctly
+         * parented) clip factory, and the resulting empty clip fails HasValidBinding.
+         *
+         * Which argument IS the off side depends on the condition: Optimize normalizes
+         * IfNot/Less/NotEqual by swapping the two motions, so for those the third argument
+         * ends up as the ON side and emptying it would silently delete the toggle's content.
+         * Pick the side that survives normalization.
+         *
+         * The ThreadStatic context doubles as the enabled signal — PrepareForRun leaves it
+         * null when the module is off.
+         */
+        private static void OptimizePrefix(AnimatorCondition __0, ref object __1, ref object __2) {
+            if (conflictingBindings == null) return;
+            if (currentLayer == null || layersByBinding == null) return;
+
+            var swaps = __0.mode == AnimatorConditionMode.IfNot
+                        || __0.mode == AnimatorConditionMode.Less
+                        || __0.mode == AnimatorConditionMode.NotEqual;
 
             try {
-                if (!(__2 is AnimationClip offClip) || offClip == emptyClip) return;
+                var offClip = swaps ? __1 : __2;
+                if (offClip == null) return;
+                // A blendtree off-side is not a clip; leave those to stock conversion.
+                if (!ClipCurveCompat.ClipType.IsInstanceOfType(offClip)) return;
+
                 var avatarRoot = BuildPhaseHooks.CurrentAvatarRoot;
                 if (avatarRoot == null) return;
+                var vfAvatarRoot = ClipCurveCompat.WrapGameObject(avatarRoot);
+                if (vfAvatarRoot == null) return;
 
                 var curves = ClipCurveCompat.AllCurvesOf(offClip);
                 if (curves.Length == 0) return;
+
+                considered++;
+                LastStats = $"candidateLayers={layersSeen} offSidesChecked={considered} oneSided={upgraded}";
 
                 foreach (var entry in curves) {
                     var binding = ClipCurveCompat.TupleBinding(entry);
                     var curve = ClipCurveCompat.TupleCurve(entry);
 
-                    if (binding.type == typeof(Animator) && string.IsNullOrEmpty(binding.path)) return;
-                    if (conflictingBindings.Contains(binding)) return;
-                    // The candidate's own bindings (its on clip) are the only acceptable
-                    // writers; any other FX layer writing this binding → keep two-sided.
-                    if (!candidateBindings.Contains(binding)) return;
-                    if (!fxWriterLayerCount.TryGetValue(binding, out var writers) || writers != 1) return;
+                    // AAPs and muscles have no resting value to fall back to.
+                    if (ClipCurveCompat.IsAnimatorBinding(binding)) return;
+
+                    // VRCFury indexes its layers under the rotation-combined normal form.
+                    var normalized = ClipCurveCompat.Normalize(binding, true);
+                    if (conflictingBindings.Contains(normalized)) return;
+
+                    // Stock two-sided conversion writes the rest value OVER lower-priority
+                    // layers while off; one-sided must not change that, so the candidate
+                    // layer has to be the only writer. The defaults layer is exempt: what it
+                    // writes IS the rest value, which is exactly what we substitute. A
+                    // binding missing from the index was filtered as invalid — bail.
+                    if (!(layersByBinding[normalized] is IEnumerable writers)) return;
+                    foreach (var writer in writers) {
+                        if (ReferenceEquals(writer, currentLayer)) continue;
+                        if (defaultLayer != null && ReferenceEquals(writer, defaultLayer)) continue;
+                        return;
+                    }
 
                     if (curve == null || !ClipCurveCompat.IsFloat(curve)) return;
                     var floatCurve = ClipCurveCompat.FloatCurveOf(curve);
                     if (floatCurve == null || !NoOpCurveStripPass.IsConstant(floatCurve, out var value)) return;
-                    if (!AnimationUtility.GetFloatValue(avatarRoot, binding, out var rest)) return;
-                    if (!NoOpCurveStripPass.ValuesMatch(binding, value, rest)) return;
+                    if (!ClipCurveCompat.TryGetRestValue(binding, vfAvatarRoot, out var rest)) return;
+                    if (!NoOpCurveStripPass.ValuesMatch(
+                            ClipCurveCompat.PropertyNameOf(binding), value, rest)) return;
                 }
 
-                __2 = emptyClip;
+                if (swaps) __1 = null; else __2 = null;
                 upgraded++;
                 LastUpgraded = upgraded;
-                LastStats = $"oneSided={upgraded}";
+                LastStats = $"candidateLayers={layersSeen} offSidesChecked={considered} oneSided={upgraded}";
             } catch {
                 // Leave the motion untouched — stock two-sided conversion proceeds.
             }
