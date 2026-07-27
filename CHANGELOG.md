@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.2.1 — 2026-07-27
+
+Tracks VRCFury 1.1394. VRCFury now keeps SaveAssets inside its build-wide asset-editing
+scope, requires an explicit avatar root when validating animation bindings, and commits a
+save session through `SaveAssetsSession.Finish()`.
+
+- **VRCFury pin → 1.1394.0:** the exact package and runtime compatibility pins move from
+  1.1382.0 to 1.1394.0.
+- **SaveAssets batching retired as native:** VRCFury's save rewrite no longer exits and
+  re-enters asset editing during SaveAssets. The old Unity 2022 patch has been removed and
+  its toggle remains struck through with the upstream replacement linked.
+- **Fixed the separate-local and fade toggle converters on 1.1394:** both validators now
+  pass the same avatar binding root as VRCFury's own layer-to-tree optimizer.
+- **Updated experimental play-mode no-disk saving:** the patch now suppresses the
+  `SaveAssetsSession.Finish()` commit and scopes the controller-list save overload, covering
+  both the main save and the parameter compressor's late FX-only re-save.
+
 ## 1.2.0 — 2026-07-24
 
 Tracks VRCFury 1.1382. VRCFury 1.1370–1.1382 replaced its animation model wholesale: clips,

@@ -72,7 +72,8 @@ namespace FuryPlusPlus {
         internal static Type MotionType;                       // VF.Utils.Controller.VFMotion
         internal static MethodInfo MotionIsStatic;             // VFMotion.IsStatic()
         internal static MethodInfo MotionEvaluate;             // VFMotion.EvaluateMotion(float)
-        internal static MethodInfo HasValidBinding;            // ValidateBindingsService.HasValidBinding(VFMotion)
+        internal static MethodInfo HasValidBinding;            // ValidateBindingsService.HasValidBinding(VFMotion, VFGameObject)
+        internal static FieldInfo LayerAvatarObject;           // LayerToTreeService.avatarObject
         internal static MethodInfo ControllerGetParam;         // VFController.GetParam(string)
         internal static PropertyInfo ControllerParameters;     // VFController.parameters
         internal static Type ClipsIteratorType;                // AnimatorIterator+Clips
@@ -222,8 +223,13 @@ namespace FuryPlusPlus {
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
                 method => method.GetParameters().Length == 1);
             HasValidBinding = validateType == null ? null : ReflectionUtils.FindUniqueMethod(
-                validateType, "HasValidBinding", method => method.GetParameters().Length == 1
-                    && method.GetParameters()[0].ParameterType == MotionType);
+                validateType, "HasValidBinding", method => {
+                    var parameters = method.GetParameters();
+                    return parameters.Length == 2
+                           && parameters[0].ParameterType == MotionType
+                           && parameters[1].ParameterType.FullName == "VF.Utils.VFGameObject";
+                });
+            LayerAvatarObject = layerToTreeType?.GetField("avatarObject", inst);
             clipCreate = clipType == null ? null : ReflectionUtils.FindUniqueMethod(
                 clipType, "Create", method => method.IsStatic && method.GetParameters().Length == 1);
             ControllerGetParam = ReflectionUtils.FindMethodWithSignature(
@@ -348,7 +354,10 @@ namespace FuryPlusPlus {
             ReflectionUtils.Demand(TrDuration, "VFTransition.duration");
             ReflectionUtils.Demand(MotionIsStatic, "VFMotion.IsStatic()");
             ReflectionUtils.Demand(MotionEvaluate, "VFMotion.EvaluateMotion(fraction)");
-            ReflectionUtils.Demand(HasValidBinding, "ValidateBindingsService.HasValidBinding(VFMotion)");
+            ReflectionUtils.Demand(
+                HasValidBinding,
+                "ValidateBindingsService.HasValidBinding(VFMotion, VFGameObject)");
+            ReflectionUtils.Demand(LayerAvatarObject, "LayerToTreeService.avatarObject");
             ReflectionUtils.Demand(ControllerGetParam, "VFController.GetParam(string)");
             ReflectionUtils.Demand(ClipsFromMotion, "AnimatorIterator.Clips.From(VFMotion)");
             ReflectionUtils.Demand(clipCreate, "VFClip.Create(name)");
@@ -374,6 +383,10 @@ namespace FuryPlusPlus {
 
         internal static object TreeToMotion(object vfBlendTree) {
             return TreeToMotionOp.Invoke(null, new[] { vfBlendTree });
+        }
+
+        internal static object GetBindingRoot(object layerToTreeService) {
+            return LayerAvatarObject.GetValue(layerToTreeService);
         }
 
         internal static object MakeVfaFloat(string name, float def) {

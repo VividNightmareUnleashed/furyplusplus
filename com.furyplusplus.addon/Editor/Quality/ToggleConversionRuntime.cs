@@ -22,6 +22,7 @@ namespace FuryPlusPlus {
             internal object Fx;
             internal object LayerControl;
             internal object ValidateBindings;
+            internal object BindingRoot;
             internal List<Entry> Layers;
         }
 
@@ -70,6 +71,7 @@ namespace FuryPlusPlus {
                 Fx = fx,
                 LayerControl = layerControl,
                 ValidateBindings = validateBindings,
+                BindingRoot = ToggleTreeCompat.GetBindingRoot(layerToTree),
                 Layers = new List<Entry>()
             };
             foreach (var layer in ((IEnumerable)ToggleTreeCompat.GetLayers.Invoke(fx, null)).Cast<object>()) {
@@ -245,7 +247,9 @@ namespace FuryPlusPlus {
 
         internal static bool MotionHasValidBinding(Snapshot snapshot, object motion) {
             return motion != null && (bool)ReflectionUtils.InvokeUnwrapped(
-                ToggleTreeCompat.HasValidBinding, snapshot.ValidateBindings, new[] { motion });
+                ToggleTreeCompat.HasValidBinding,
+                snapshot.ValidateBindings,
+                new[] { motion, snapshot.BindingRoot });
         }
 
         internal static bool MotionIsStatic(object motion) {

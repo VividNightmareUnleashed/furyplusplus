@@ -5,10 +5,11 @@ using UnityEditor;
 namespace FuryPlusPlus {
     /**
      * Skips VRCFury's end-of-bake disk serialization during play-mode test builds.
-     * SaveAssetsService.Run still executes — its FinalizeAsset step flushes the clip
-     * ext-db into the real clips, which the baked avatar needs — but the actual disk
-     * writes (SaveAsset/AttachAsset/work-log manifest) are no-oped: play-mode avatars run
-     * entirely off in-memory object references (Av3Emu / Gesture Manager audited).
+     * Each SaveAssetsService.Run(controllers) transaction still executes so controllers
+     * and avatar references are finalized in memory, but SaveAsset/AttachAsset and the new
+     * SaveAssetsSession.Finish disk-commit boundary are no-oped: play-mode avatars run
+     * entirely off in-memory object references (Av3Emu / Gesture Manager audited). Scoping
+     * the controller overload also covers the parameter compressor's late FX-only re-save.
      *
      * Because the baked objects then stay unsaved, VRCFury's per-tick prune (which
      * destroys factory-created objects without an asset path) would tear the avatar
@@ -51,59 +52,30 @@ namespace FuryPlusPlus {
     internal static class PlayModeNoDiskSavePatch {
         internal static string LastStats;
         internal static int LastSkippedWrites;
+        internal static int LastSkippedFinishes;
 
         private static bool scopeActive;
         private static bool suppressPruneThisPlay;
         private static int skippedWrites;
+        private static int skippedFinishes;
         private static bool subscribed;
 
         internal static void Install(Harmony harmony) {
-            var assetDbType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Utils.VRCFuryAssetDatabase"), "VF.Utils.VRCFuryAssetDatabase");
-            var saveAsset2 = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(assetDbType, "SaveAsset",
-                    method => method.GetParameters().Length == 2),
-                "VRCFuryAssetDatabase.SaveAsset(obj, fullPath)");
-            var saveAsset3 = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(assetDbType, "SaveAsset",
-                    method => method.GetParameters().Length == 3),
-                "VRCFuryAssetDatabase.SaveAsset(obj, dir, filename)");
-            var attachAsset = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(assetDbType, "AttachAsset",
-                    method => method.GetParameters().Length == 2),
-                "VRCFuryAssetDatabase.AttachAsset(obj, parent)");
-            var sessionType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Utils.SaveAssetsSession"), "VF.Utils.SaveAssetsSession");
-            var flushManifest = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(sessionType, "FlushWorkLogManifest",
-                    method => method.GetParameters().Length == 1),
-                "SaveAssetsSession.FlushWorkLogManifest(dir)");
-            var saveServiceType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Service.SaveAssetsService"), "VF.Service.SaveAssetsService");
-            var saveRun = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(saveServiceType, "Run",
-                    method => method.GetParameters().Length == 0),
-                "SaveAssetsService.Run()");
-            var factoryType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Utils.VrcfObjectFactory"), "VF.Utils.VrcfObjectFactory");
-            var prune = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(factoryType, "Prune",
-                    method => method.GetParameters().Length == 0),
-                "VrcfObjectFactory.Prune()");
+            SaveAssetsCompat.DemandNoDiskSave();
             UploadCompat.DemandCore();
 
-            harmony.Patch(saveRun,
+            harmony.Patch(SaveAssetsCompat.SaveAssetsRunTransaction,
                 prefix: new HarmonyMethod(typeof(PlayModeNoDiskSavePatch), nameof(RunPrefix)),
                 finalizer: new HarmonyMethod(typeof(PlayModeNoDiskSavePatch), nameof(RunFinalizer)));
-            harmony.Patch(saveAsset2,
+            harmony.Patch(SaveAssetsCompat.SaveAsset2,
                 prefix: new HarmonyMethod(typeof(PlayModeNoDiskSavePatch), nameof(SkipInScopePrefix)));
-            harmony.Patch(saveAsset3,
+            harmony.Patch(SaveAssetsCompat.SaveAsset3,
                 prefix: new HarmonyMethod(typeof(PlayModeNoDiskSavePatch), nameof(SkipInScopePrefix)));
-            harmony.Patch(attachAsset,
+            harmony.Patch(SaveAssetsCompat.AttachAsset,
                 prefix: new HarmonyMethod(typeof(PlayModeNoDiskSavePatch), nameof(SkipInScopePrefix)));
-            harmony.Patch(flushManifest,
-                prefix: new HarmonyMethod(typeof(PlayModeNoDiskSavePatch), nameof(SkipInScopePrefix)));
-            harmony.Patch(prune,
+            harmony.Patch(SaveAssetsCompat.Finish,
+                prefix: new HarmonyMethod(typeof(PlayModeNoDiskSavePatch), nameof(SkipFinishInScopePrefix)));
+            harmony.Patch(SaveAssetsCompat.FactoryPrune,
                 prefix: new HarmonyMethod(typeof(PlayModeNoDiskSavePatch), nameof(PrunePrefix)));
 
             if (!subscribed) {
@@ -122,6 +94,7 @@ namespace FuryPlusPlus {
             if (scopeActive) {
                 suppressPruneThisPlay = true;
                 skippedWrites = 0;
+                skippedFinishes = 0;
             }
         }
 
@@ -131,8 +104,9 @@ namespace FuryPlusPlus {
                 if (skippedWrites > 0) {
                     Log.Info($"Play-mode bake kept in memory: skipped {skippedWrites} disk write(s) " +
                              "(assets are not persisted; exit/re-enter play after script changes).");
-                    LastStats = $"skippedWrites={skippedWrites}";
+                    LastStats = $"skippedWrites={skippedWrites} finishTransactions={skippedFinishes}";
                     LastSkippedWrites = skippedWrites;
+                    LastSkippedFinishes = skippedFinishes;
                 }
             }
             return __exception;
@@ -141,6 +115,13 @@ namespace FuryPlusPlus {
         private static bool SkipInScopePrefix() {
             if (!scopeActive) return true;
             skippedWrites++;
+            return false;
+        }
+
+        private static bool SkipFinishInScopePrefix() {
+            if (!scopeActive) return true;
+            skippedWrites++;
+            skippedFinishes++;
             return false;
         }
 
