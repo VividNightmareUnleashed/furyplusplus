@@ -78,9 +78,9 @@ namespace FuryPlusPlus {
             );
         }
 
-        private static void BuildLayerPostfix(object __instance, object __0) {
+        private static void BuildLayerPostfix(object __0, object __1) {
             if (!CompressorScope.RunActive || !CompressorScope.Sub8Active) return;
-            Sub8Surgery.Run(__instance, __0);
+            Sub8Surgery.Run(__0, __1);
         }
 
         internal override string ReportStats() {
@@ -100,10 +100,9 @@ namespace FuryPlusPlus {
         internal static void Resolve() {
             CompressorCompat.DemandCore();
             ReflectionUtils.Demand(CompressorCompat.LayerBuildLayer,
-                "ParameterCompressorLayerService.BuildLayer(decision)");
-            ReflectionUtils.Demand(CompressorCompat.LayerServiceControllers,
-                "ParameterCompressorLayerService.controllers");
-            ReflectionUtils.Demand(CompressorCompat.GetFx, "ControllersService.GetFx()");
+                "ParameterCompressorLayerService.BuildLayer(decision, controller)");
+            ReflectionUtils.Demand(CompressorCompat.ControllerManagerType,
+                "VF.Utils.ControllerManager");
             ReflectionUtils.Demand(CompressorCompat.DecisionGetIndexBitCount,
                 "OptimizationDecision.GetIndexBitCount()");
             ReflectionUtils.Demand(CompressorCompat.MakeAap, "ControllerManager.MakeAap(string, float, bool)");
@@ -187,7 +186,7 @@ namespace FuryPlusPlus {
             internal string LoOutAap;
         }
 
-        internal static void Run(object layerService, object decision) {
+        internal static void Run(object decision, object controller) {
             var compress = (IList<VRCExpressionParameters.Parameter>)
                 CompressorCompat.DecisionCompress.GetValue(decision);
             var pairs = CompressorScope.ComputeSub8Pairs(compress);
@@ -195,8 +194,6 @@ namespace FuryPlusPlus {
             if ((bool)CompressorCompat.DecisionUseBadPriority.GetValue(decision)) return;
 
             // ---- gather everything first; throw (failing the build) before any mutation ----
-            var controllers = CompressorCompat.LayerServiceControllers.GetValue(layerService);
-            var fx = CompressorCompat.GetFx.Invoke(controllers, null);
 
             var batchesObj = CompressorCompat.DecisionGetBatches.Invoke(decision, null);
             var numberBatches = (List<List<VRCExpressionParameters.Parameter>>)
@@ -214,12 +211,12 @@ namespace FuryPlusPlus {
             }
             var latchSendCount = CountIn(numberBatches, num => num != 0) + CountIn(boolBatches, num => num != 0);
 
-            var compressorLayer = FindCompressorLayer(fx);
+            var compressorLayer = FindCompressorLayer(controller);
             var compressorMachine = ToggleTreeCompat.LayerStateMachine.GetValue(compressorLayer);
             if (compressorMachine == null) {
                 throw new Exception("FuryPlusPlus sub-8-bit packing: Parameter Compressor layer has no states.");
             }
-            var trueParam = FindTrueParam(fx);
+            var trueParam = FindTrueParam(controller);
 
             var plans = new List<PairPlan>();
             foreach (var (rep, partner) in pairs) {
@@ -243,10 +240,10 @@ namespace FuryPlusPlus {
             foreach (var plan in plans) {
                 var packedDefault = QuantizeIndex(plan.Rep.defaultValue) * 16
                                     + QuantizeIndex(plan.Partner.defaultValue);
-                plan.PackedAap = MakeAap(fx, $"FPP/Sub8/{plan.Rep.name}+{plan.Partner.name}", packedDefault);
-                plan.HiOutAap = MakeAap(fx, $"FPP/Sub8/{plan.Rep.name}/decoded",
+                plan.PackedAap = MakeAap(controller, $"FPP/Sub8/{plan.Rep.name}+{plan.Partner.name}", packedDefault);
+                plan.HiOutAap = MakeAap(controller, $"FPP/Sub8/{plan.Rep.name}/decoded",
                     DecodeValue(QuantizeIndex(plan.Rep.defaultValue)));
-                plan.LoOutAap = MakeAap(fx, $"FPP/Sub8/{plan.Partner.name}/decoded",
+                plan.LoOutAap = MakeAap(controller, $"FPP/Sub8/{plan.Partner.name}/decoded",
                     DecodeValue(QuantizeIndex(plan.Partner.defaultValue)));
 
                 // Send: same slot, packed AAP instead of the stock full-precision mapping.
@@ -262,9 +259,9 @@ namespace FuryPlusPlus {
 
             InsertDecodeStates(compressorLayer, compressorMachine, plans, trueParam);
 
-            var oneParam = GetOneParamName(fx);
-            BuildEncodeLayer(fx, plans, oneParam);
-            BuildDecodeLayer(fx, compressorLayer, plans, oneParam);
+            var oneParam = GetOneParamName(controller);
+            BuildEncodeLayer(controller, plans, oneParam);
+            BuildDecodeLayer(controller, compressorLayer, plans, oneParam);
         }
 
         private static PairPlan BuildPlan(
@@ -516,13 +513,13 @@ namespace FuryPlusPlus {
         // ---- encode / decode construction (raw Unity objects: immune to VRCFury's
         //      factory prune, and serialized with the controller like stock's states) ----
 
-        private static string MakeAap(object fx, string name, float def) {
-            var aap = CompressorCompat.MakeAap.Invoke(fx, new object[] { name, def, true });
+        private static string MakeAap(object controller, string name, float def) {
+            var aap = CompressorCompat.MakeAap.Invoke(controller, new object[] { name, def, true });
             return (string)vfaApName.Invoke(aap, null);
         }
 
-        private static string GetOneParamName(object fx) {
-            var one = controllerManagerOne.Invoke(fx, null);
+        private static string GetOneParamName(object controller) {
+            var one = controllerManagerOne.Invoke(controller, null);
             return (string)ToggleTreeCompat.VfaParamName.Invoke(one, null);
         }
 
@@ -571,9 +568,9 @@ namespace FuryPlusPlus {
             return tree;
         }
 
-        private static object NewDbtLayer(object fx, string name, int insertAt) {
+        private static object NewDbtLayer(object controller, string name, int insertAt) {
             var layer = ReflectionUtils.InvokeUnwrapped(
-                ToggleTreeCompat.NewLayer, fx, new object[] { name, insertAt });
+                ToggleTreeCompat.NewLayer, controller, new object[] { name, insertAt });
             var state = ReflectionUtils.InvokeUnwrapped(
                 ToggleTreeCompat.NewState, layer, new object[] { "DBT" });
             var root = NewTree("DBT", BlendTreeType.Direct, null);
@@ -582,8 +579,8 @@ namespace FuryPlusPlus {
             return root;
         }
 
-        private static void BuildEncodeLayer(object fx, List<PairPlan> plans, string oneParam) {
-            var root = NewDbtLayer(fx, "FuryPlusPlus Sub8 Encode", -1);
+        private static void BuildEncodeLayer(object controller, List<PairPlan> plans, string oneParam) {
+            var root = NewDbtLayer(controller, "FuryPlusPlus Sub8 Encode", -1);
             foreach (var plan in plans) {
                 // Two step trees summing into the packed AAP: hi*16 + lo.
                 AddChild(root, Child(StepTree(plan.Rep.name, plan.PackedAap, 16f), 0, oneParam));
@@ -592,7 +589,7 @@ namespace FuryPlusPlus {
         }
 
         private static void BuildDecodeLayer(
-            object fx,
+            object controller,
             object compressorLayer,
             List<PairPlan> plans,
             string oneParam
@@ -603,7 +600,7 @@ namespace FuryPlusPlus {
                 ToggleTreeCompat.LayerGetId, compressorLayer, null);
             if (compressorIndex < 0) compressorIndex = -1;
 
-            var root = NewDbtLayer(fx, "FuryPlusPlus Sub8 Decode", compressorIndex);
+            var root = NewDbtLayer(controller, "FuryPlusPlus Sub8 Decode", compressorIndex);
             foreach (var plan in plans) {
                 var decode = NewTree($"FPP Sub8 decode {plan.SlotParamName}",
                     BlendTreeType.Simple1D, plan.SlotParamName);

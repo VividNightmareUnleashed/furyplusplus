@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.2 — 2026-08-03
+
+Tracks VRCFury 1.1408. VRCFury now builds the parameter compressor in the Action controller
+and passes that controller directly to `ParameterCompressorLayerService.BuildLayer`.
+
+- **VRCFury pin → 1.1408.0:** the exact package and runtime compatibility pins move from
+  1.1394.0 to 1.1408.0.
+- **Ported opt-in 4-bit float pairs to the Action compressor:** sub-8 layer surgery now uses
+  the controller passed to `BuildLayer(decision, controller)`, keeping its encode, decode and
+  compressor layers together without depending on the removed controller-service field or an
+  FX lookup.
+
 ## 1.2.1 — 2026-07-27
 
 Tracks VRCFury 1.1394. VRCFury now keeps SaveAssets inside its build-wide asset-editing

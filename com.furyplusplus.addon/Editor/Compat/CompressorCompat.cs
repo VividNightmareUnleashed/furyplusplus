@@ -41,8 +41,8 @@ namespace FuryPlusPlus {
         internal static Type CompressorServiceType;           // ParameterCompressorService
         internal static MethodInfo CompressorApply;           // Apply()
         internal static Type LayerServiceType;                // ParameterCompressorLayerService
-        internal static MethodInfo LayerBuildLayer;           // BuildLayer(OptimizationDecision)
-        internal static FieldInfo LayerServiceControllers;    // ControllersService field
+        internal static Type ControllerManagerType;           // VF.Utils.ControllerManager
+        internal static MethodInfo LayerBuildLayer;           // BuildLayer(OptimizationDecision, ControllerManager)
 
         internal static MethodInfo ParamsGetReadOnly;         // ParamsService.GetReadOnlyParams()
         internal static MethodInfo GetMaxCost;                // VRCExpressionParametersExtensions.GetMaxCost()
@@ -59,7 +59,6 @@ namespace FuryPlusPlus {
         internal static MethodInfo ClipSetAap;                // AnimationClipExtensions.SetAap(clip, string, FloatOrObjectCurve)
         internal static MethodInfo FloatToCurve;              // FloatOrObjectCurve.op_Implicit(float)
         internal static MethodInfo MakeAap;                   // ControllerManager.MakeAap(string, float, bool)
-        internal static MethodInfo GetFx;                     // ControllersService.GetFx()
 
         internal static void EnsureResolved() {
             if (resolved) return;
@@ -116,11 +115,16 @@ namespace FuryPlusPlus {
             CompressorServiceType = ReflectionUtils.FindType("VF.Service.Compressor.ParameterCompressorService");
             CompressorApply = CompressorServiceType == null ? null : ReflectionUtils.FindUniqueMethod(
                 CompressorServiceType, "Apply", method => method.GetParameters().Length == 0);
+            ControllerManagerType = ReflectionUtils.FindType("VF.Utils.ControllerManager");
             LayerServiceType = ReflectionUtils.FindType("VF.Service.Compressor.ParameterCompressorLayerService");
             if (LayerServiceType != null) {
                 LayerBuildLayer = ReflectionUtils.FindUniqueMethod(LayerServiceType, "BuildLayer",
-                    method => method.GetParameters().Length == 1);
-                LayerServiceControllers = LayerServiceType.GetField("controllers", any);
+                    method => {
+                        var parameters = method.GetParameters();
+                        return parameters.Length == 2
+                               && parameters[0].ParameterType == DecisionType
+                               && parameters[1].ParameterType == ControllerManagerType;
+                    });
             }
 
             var paramsServiceType = ReflectionUtils.FindType("VF.Service.ParamsService");
@@ -144,8 +148,6 @@ namespace FuryPlusPlus {
                 ControllersGetAll = ReflectionUtils.FindUniqueMethod(
                     controllersServiceType, "GetAllUsedControllers",
                     method => method.GetParameters().Length == 0);
-                GetFx = ReflectionUtils.FindUniqueMethod(controllersServiceType, "GetFx",
-                    method => method.GetParameters().Length == 0);
             }
 
             var menuItemType = ReflectionUtils.FindType("VF.Menu.CompressorMenuItem");
@@ -165,9 +167,8 @@ namespace FuryPlusPlus {
                 .SingleOrDefault(method => method.Name == "op_Implicit"
                                            && method.GetParameters().Length == 1
                                            && method.GetParameters()[0].ParameterType == typeof(float));
-            var controllerManagerType = ReflectionUtils.FindType("VF.Utils.ControllerManager");
-            MakeAap = controllerManagerType == null ? null : ReflectionUtils.FindUniqueMethod(
-                controllerManagerType, "MakeAap", method => method.GetParameters().Length == 3);
+            MakeAap = ControllerManagerType == null ? null : ReflectionUtils.FindUniqueMethod(
+                ControllerManagerType, "MakeAap", method => method.GetParameters().Length == 3);
         }
 
         /** Members every compressor module needs; call from Install(). */

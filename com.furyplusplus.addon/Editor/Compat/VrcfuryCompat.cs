@@ -10,7 +10,7 @@ namespace FuryPlusPlus {
      * lookups live in lazy area holders (ArmatureCompat, ...), resolved on first module use.
      */
     internal sealed class VrcfuryCompat {
-        internal const string PinnedVersion = "1.1394.0";
+        internal const string PinnedVersion = "1.1408.0";
         internal const string AvatarsEditorAssemblyName = "VRCFury-Editor-Avatars";
 
         internal string PackageVersion { get; private set; }

@@ -9,7 +9,7 @@ namespace FuryPlusPlus {
      * and avatar references are finalized in memory, but SaveAsset/AttachAsset and the new
      * SaveAssetsSession.Finish disk-commit boundary are no-oped: play-mode avatars run
      * entirely off in-memory object references (Av3Emu / Gesture Manager audited). Scoping
-     * the controller overload also covers the parameter compressor's late FX-only re-save.
+     * the controller overload also covers the parameter compressor's late Action re-save.
      *
      * Because the baked objects then stay unsaved, VRCFury's per-tick prune (which
      * destroys factory-created objects without an asset path) would tear the avatar
