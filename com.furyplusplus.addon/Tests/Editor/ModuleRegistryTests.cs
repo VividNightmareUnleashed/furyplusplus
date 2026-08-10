@@ -1,4 +1,5 @@
 using System.Linq;
+using System.Reflection;
 using NUnit.Framework;
 
 namespace FuryPlusPlus.Tests.Editor {
@@ -120,6 +121,28 @@ namespace FuryPlusPlus.Tests.Editor {
                         $"{module.Id}: Quality modules change VRCFury's output and must be version-pinned");
                 }
             }
+        }
+
+        [Test]
+        public void BlendshapeRewriteTargetsCurrentGetPathSignature() {
+            var module = ModuleRegistry.Find("blendshapeBakeRewrite");
+            if (!ModuleRegistry.IsActive(module)) {
+                Assert.Ignore("blendshape rewrite module not installed (VRCFury absent or incompatible)");
+            }
+
+            var field = typeof(BlendshapeBakeRewritePatch).GetField(
+                "ownerGetPath", BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null);
+            var method = (MethodInfo)field.GetValue(null);
+            Assert.That(method, Is.Not.Null);
+
+            var parameters = method.GetParameters();
+            Assert.AreEqual(3, parameters.Length);
+            Assert.AreEqual("VF.Utils.VFGameObject", parameters[0].ParameterType.FullName);
+            Assert.AreEqual(typeof(bool), parameters[1].ParameterType);
+            Assert.AreEqual(typeof(bool), parameters[2].ParameterType);
+            Assert.That(parameters[2].HasDefaultValue, Is.True);
+            Assert.AreEqual(false, parameters[2].DefaultValue);
         }
     }
 }

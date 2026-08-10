@@ -147,10 +147,15 @@ namespace FuryPlusPlus {
                 "component.owner()");
             ownerGetPath = ReflectionUtils.Demand(
                 vfGameObjectType.GetMethods(any)
-                    .SingleOrDefault(method => method.Name == "GetPath"
-                                               && method.GetParameters().Length == 2
-                                               && method.GetParameters()[0].ParameterType == vfGameObjectType),
-                "VFGameObject.GetPath(root, prettyRoot)");
+                    .SingleOrDefault(method => {
+                        var parameters = method.GetParameters();
+                        return method.Name == "GetPath"
+                               && parameters.Length == 3
+                               && parameters[0].ParameterType == vfGameObjectType
+                               && parameters[1].ParameterType == typeof(bool)
+                               && parameters[2].ParameterType == typeof(bool);
+                    }),
+                "VFGameObject.GetPath(root, prettyRoot, removeCloneFromRoot)");
             isMaybeMmdBlendshape = ReflectionUtils.Demand(
                 ReflectionUtils.FindUniqueMethod(mmdUtilsType, "IsMaybeMmdBlendshape",
                     method => method.GetParameters().Length == 1),
@@ -253,7 +258,8 @@ namespace FuryPlusPlus {
                 if (blendshapeCount == 0) continue;
                 var skinOwnerObj = skinOwner.Invoke(null, new object[] { skin });
                 var path = (string)ReflectionUtils.InvokeUnwrapped(
-                    ownerGetPath, skinOwnerObj, new[] { avatarObjectField.GetValue(builder), (object)false });
+                    ownerGetPath, skinOwnerObj,
+                    new[] { avatarObjectField.GetValue(builder), (object)false, (object)false });
 
                 logOutput.Append($"\n┬─ Optimizing {path}\n");
 

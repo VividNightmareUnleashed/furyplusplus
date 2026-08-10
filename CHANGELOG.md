@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.3 — 2026-08-10
+
+Tracks VRCFury 1.1416. VRCFury added an optional debug-path flag to
+`VFGameObject.GetPath`.
+
+- **VRCFury pin → 1.1416.0:** the exact package and runtime compatibility pins move from
+  1.1408.0 to 1.1416.0.
+- **Kept the fast blendshape optimizer active:** its reflected path lookup now binds the
+  three-argument `GetPath(root, prettyRoot, removeCloneFromRoot)` signature and passes
+  `false` for the new flag, preserving the previous bake-log path behavior.
+
 ## 1.2.2 — 2026-08-03
 
 Tracks VRCFury 1.1408. VRCFury now builds the parameter compressor in the Action controller

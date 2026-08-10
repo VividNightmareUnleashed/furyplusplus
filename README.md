@@ -11,7 +11,7 @@ patches. The two cannot run together: while QuickFury is installed, FuryPlusPlus
 QuickFury's patches each session and warns. Remove `com.quickfury.addon` (settings do not carry
 over).
 
-FuryPlusPlus 1.2.2 is tested against VRCFury 1.1408.0. On the reference avatar it reduced a warm
+FuryPlusPlus 1.2.3 is tested against VRCFury 1.1416.0. On the reference avatar it reduced a warm
 VRCFury bake from **93.8 seconds (stock) to 11–12 seconds**, and its output-quality passes cut
 the avatar's synced parameter data from **444 to 177 bits**.
 
@@ -20,11 +20,11 @@ the avatar's synced parameter data from **444 to 177 bits**.
 - Unity 2022.3
 - VRChat Avatars SDK 3.10.3 or newer
 - VRCFury installed separately
-- Behavior-changing modules: **VRCFury 1.1408.0 exactly**
+- Behavior-changing modules: **VRCFury 1.1416.0 exactly**
 
 FuryPlusPlus discovers VRCFury's internal Editor methods at load time. Profiling remains available
 whenever the profiling signatures match, but version-pinned modules are disabled unless the
-installed VRCFury version is exactly `1.1408.0`. Each module also checks its own target signatures
+installed VRCFury version is exactly `1.1416.0`. Each module also checks its own target signatures
 and stays disabled if they differ. This is deliberately fail-closed because VRCFury does not expose
 a public extension API for these bake internals.
 
@@ -41,7 +41,7 @@ version-pinned module disabled.
    present, but the package should not stay installed.)
 3. Add the package through the Creator Companion or by hand — both methods below.
 4. Wait for the Editor to recompile. The Console should report
-   `[FuryPlusPlus] Ready: 29/29 modules installed for VRCFury 1.1408.0, 15 superseded`.
+   `[FuryPlusPlus] Ready: 29/29 modules installed for VRCFury 1.1416.0, 15 superseded`.
 
 ### Via the VRChat Creator Companion (recommended)
 
