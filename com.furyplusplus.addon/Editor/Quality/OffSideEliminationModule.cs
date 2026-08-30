@@ -76,9 +76,6 @@ namespace FuryPlusPlus {
         [ThreadStatic] private static IDictionary layersByBinding;
 
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
-            var serviceType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Service.LayerToTreeService"), "VF.Service.LayerToTreeService");
-
             ClipCurveCompat.DemandCore();
             ReflectionUtils.Demand(ClipCurveCompat.ClipGetAllCurves, "VFClip.GetAllCurves()");
             ReflectionUtils.Demand(ClipCurveCompat.BindingNormalize, "VFBinding.Normalize(combineRotation)");
@@ -91,17 +88,16 @@ namespace FuryPlusPlus {
 
             // OptimizeLayer(layer, bindingsByLayer, layersByBinding, directTree)
             var optimizeLayer = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(serviceType, "OptimizeLayer",
-                    method => method.GetParameters().Length == 4),
+                ToggleTreeCompat.OptimizeLayer,
                 "LayerToTreeService.OptimizeLayer(layer, bindingsByLayer, layersByBinding, tree)");
             if (!typeof(IDictionary).IsAssignableFrom(optimizeLayer.GetParameters()[2].ParameterType)) {
-                throw new InvalidOperationException("layersByBinding is not a dictionary");
+                throw new MissingMemberException(
+                    "LayerToTreeService.OptimizeLayer layersByBinding dictionary signature");
             }
 
             // Optimize(condition, on, off, directTree)
             var optimize = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(serviceType, "Optimize",
-                    method => method.GetParameters().Length == 4),
+                ToggleTreeCompat.Optimize,
                 "LayerToTreeService.Optimize(condition, on, off, tree)");
             // (AnimatorCondition, VFMotion on, VFMotion off, …) — the condition drives which
             // of the two motions survives normalization as the off side, so its type matters
@@ -111,7 +107,8 @@ namespace FuryPlusPlus {
             if (optimizeParams[0].ParameterType != typeof(AnimatorCondition)
                 || optimizeParams[1].ParameterType != motionType
                 || optimizeParams[2].ParameterType != motionType) {
-                throw new InvalidOperationException("target signature mismatch");
+                throw new MissingMemberException(
+                    "LayerToTreeService.Optimize(AnimatorCondition, VFMotion, VFMotion, tree)");
             }
 
             BuildPhaseHooks.RegisterBefore("LayerToTree", OffSideEliminationModule.Instance.Id,

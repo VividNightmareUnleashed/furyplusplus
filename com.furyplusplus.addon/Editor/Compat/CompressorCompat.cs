@@ -31,6 +31,7 @@ namespace FuryPlusPlus {
         internal static FieldInfo SolverParamsService;
         internal static FieldInfo SolverControllers;
         internal static FieldInfo SolverExcService;
+        internal static FieldInfo SolverMenuService;
 
         internal static Type SolverOutputType;                // ParameterCompressorSolverOutput
         internal static FieldInfo OutputDecision;
@@ -53,6 +54,17 @@ namespace FuryPlusPlus {
         // IsParamUsed onto, and it yields ControllerManager (a VFController), so the parameter
         // and layer surface both consumers need is reachable straight off the wrapper.
         internal static MethodInfo ControllersGetAll;         // ControllersService.GetAllUsedControllers()
+        internal static MethodInfo ControllersIsParamUsed;
+        internal static FieldInfo ControllersParamsService;
+        internal static MethodInfo MenuGetReadOnly;
+        internal static MethodInfo ControllerNewParam;
+        internal static PropertyInfo ControllerParameters;
+        internal static MethodInfo ParamManagerAddSynced;
+        internal static PropertyInfo ControllerLayers;
+        internal static MethodInfo LayerGetDrivers;
+        internal static MethodInfo ControllerManagerOne;
+        internal static MethodInfo VfaApName;
+        internal static MethodInfo FactoryCreate;
 
         internal static MethodInfo CompressorMenuItemGet;     // CompressorMenuItem.Get()
 
@@ -101,6 +113,7 @@ namespace FuryPlusPlus {
                 SolverParamsService = SolverType.GetField("paramsService", any);
                 SolverControllers = SolverType.GetField("controllers", any);
                 SolverExcService = SolverType.GetField("excService", any);
+                SolverMenuService = SolverType.GetField("menuService", any);
             }
 
             SolverOutputType = ReflectionUtils.FindType("VF.Service.Compressor.ParameterCompressorSolverOutput");
@@ -148,7 +161,34 @@ namespace FuryPlusPlus {
                 ControllersGetAll = ReflectionUtils.FindUniqueMethod(
                     controllersServiceType, "GetAllUsedControllers",
                     method => method.GetParameters().Length == 0);
+                ControllersIsParamUsed = ReflectionUtils.FindMethodWithSignature(
+                    controllersServiceType, "IsParamUsed", typeof(bool), typeof(string));
+                ControllersParamsService = controllersServiceType.GetField("paramsService", any);
             }
+
+            var menuServiceType = ReflectionUtils.FindType("VF.Service.MenuService");
+            MenuGetReadOnly = menuServiceType == null ? null : ReflectionUtils.FindUniqueMethod(
+                menuServiceType, "GetReadOnlyMenu", method => method.GetParameters().Length == 0);
+            var vfControllerType = ReflectionUtils.FindType("VF.Utils.Controller.VFController");
+            if (vfControllerType != null) {
+                ControllerNewParam = ReflectionUtils.FindUniqueMethod(
+                    vfControllerType, "_NewParam", method => method.GetParameters().Length == 3);
+                ControllerParameters = vfControllerType.GetProperty("parameters", any);
+                ControllerLayers = vfControllerType.GetProperty("layers", any);
+            }
+            var paramManagerType = ReflectionUtils.FindType("VF.Utils.ParamManager");
+            ParamManagerAddSynced = paramManagerType == null ? null : ReflectionUtils.FindUniqueMethod(
+                paramManagerType, "AddSyncedParam", method => method.GetParameters().Length == 1);
+            var layerType = ReflectionUtils.FindType("VF.Utils.Controller.VFLayer");
+            var getBehaviours = layerType == null ? null : ReflectionUtils.FindUniqueMethod(
+                layerType,
+                "GetBehaviours",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic |
+                BindingFlags.DeclaredOnly,
+                method => method.IsGenericMethodDefinition && method.GetParameters().Length == 0
+            );
+            LayerGetDrivers = getBehaviours?.MakeGenericMethod(
+                typeof(VRC.SDK3.Avatars.Components.VRCAvatarParameterDriver));
 
             var menuItemType = ReflectionUtils.FindType("VF.Menu.CompressorMenuItem");
             CompressorMenuItemGet = menuItemType == null ? null : ReflectionUtils.FindUniqueMethod(
@@ -169,6 +209,16 @@ namespace FuryPlusPlus {
                                            && method.GetParameters()[0].ParameterType == typeof(float));
             MakeAap = ControllerManagerType == null ? null : ReflectionUtils.FindUniqueMethod(
                 ControllerManagerType, "MakeAap", method => method.GetParameters().Length == 3);
+            ControllerManagerOne = ControllerManagerType == null ? null : ReflectionUtils.FindUniqueMethod(
+                ControllerManagerType, "One", method => method.GetParameters().Length == 0);
+            var vfaApType = ReflectionUtils.FindType("VF.Utils.BlendtreeMath+VFAap");
+            VfaApName = vfaApType == null ? null : ReflectionUtils.FindUniqueMethod(
+                vfaApType, "Name", method => method.GetParameters().Length == 0);
+            var factoryType = ReflectionUtils.FindType("VF.Utils.VrcfObjectFactory");
+            FactoryCreate = factoryType == null ? null : ReflectionUtils.FindUniqueMethod(
+                factoryType, "Create", method => !method.IsGenericMethodDefinition
+                                                 && method.GetParameters().Length == 2
+                                                 && method.GetParameters()[0].ParameterType == typeof(Type));
         }
 
         /** Members every compressor module needs; call from Install(). */
@@ -186,6 +236,14 @@ namespace FuryPlusPlus {
             ReflectionUtils.Demand(BatchesItem1, "GetBatches return tuple Item1");
             ReflectionUtils.Demand(BatchesItem2, "GetBatches return tuple Item2");
             ReflectionUtils.Demand(CompressorApply, "ParameterCompressorService.Apply()");
+        }
+
+        internal static object NewSolverOutput() {
+            return Activator.CreateInstance(SolverOutputType);
+        }
+
+        internal static object NewSelectionOptions() {
+            return Activator.CreateInstance(SelectionOptionsType);
         }
     }
 }

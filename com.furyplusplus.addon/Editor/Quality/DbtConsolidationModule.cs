@@ -68,10 +68,8 @@ namespace FuryPlusPlus {
         private static PropertyInfo layerName;
 
         internal static void Resolve() {
-            var layerType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Utils.Controller.VFLayer"), "VF.Utils.Controller.VFLayer");
-
             ToggleTreeCompat.EnsureResolved();
+            ReflectionUtils.Demand(ToggleTreeCompat.LayerType, "VF.Utils.Controller.VFLayer");
             ReflectionUtils.Demand(ToggleTreeCompat.LayerStateMachine, "VFLayer.stateMachine");
             ReflectionUtils.Demand(ToggleTreeCompat.LayerHasSubMachines, "VFLayer.hasSubMachines");
             ReflectionUtils.Demand(ToggleTreeCompat.SmStates, "VFStateMachine.states");
@@ -103,9 +101,7 @@ namespace FuryPlusPlus {
             layerRemove = ReflectionUtils.Demand(ToggleTreeCompat.LayerRemove, "VFLayer.Remove()");
             layerWeight = ReflectionUtils.Demand(ToggleTreeCompat.LayerWeight, "VFLayer.weight");
             layerName = ReflectionUtils.Demand(ToggleTreeCompat.LayerName, "VFLayer.name");
-            // mask is this pass's own extra member — the area holder carries the shared set.
-            const BindingFlags any = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-            layerMask = ReflectionUtils.Demand(layerType.GetProperty("mask", any), "VFLayer.mask");
+            layerMask = ReflectionUtils.Demand(ToggleTreeCompat.LayerMask, "VFLayer.mask");
 
             ClipCurveCompat.DemandCore();
             ReflectionUtils.Demand(ClipCurveCompat.ClipGetAllBindings, "VFClip.GetAllBindings()");

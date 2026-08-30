@@ -1,5 +1,3 @@
-using System;
-using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using VRC.SDK3.Avatars.Components;
@@ -40,20 +38,8 @@ namespace FuryPlusPlus {
     }
 
     internal class FullScopeDbtPass : GuardedPreprocessorPass {
-        private static Type vrcfuryComponentType;
-        private static FieldInfo contentField;
-        private static Type directTreeOptimizerType;
-
         internal static void Resolve() {
-            vrcfuryComponentType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Model.VRCFury"), "VF.Model.VRCFury");
-            contentField = ReflectionUtils.Demand(
-                vrcfuryComponentType.GetField("content",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic),
-                "VRCFury.content");
-            directTreeOptimizerType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Model.Feature.DirectTreeOptimizer"),
-                "VF.Model.Feature.DirectTreeOptimizer");
+            AvatarPipelineCompat.DemandFullScopeDbt();
         }
 
         public override int callbackOrder => -15000;
@@ -61,23 +47,14 @@ namespace FuryPlusPlus {
         protected override Module GatingModule => FullScopeDbtModule.Instance;
 
         protected override bool Run(GameObject avatarObject) {
-            if (vrcfuryComponentType == null) return true;
             if (avatarObject.GetComponent<VRCAvatarDescriptor>() == null) return true;
 
             // Never turn a non-VRCFury avatar into a VRCFury build — only widen scope where
             // VRCFury is already going to run.
-            var components = avatarObject.GetComponentsInChildren(vrcfuryComponentType, true);
-            if (components.Length == 0) return true;
+            if (!AvatarPipelineCompat.HasVrcfuryComponent(avatarObject)) return true;
+            if (AvatarPipelineCompat.HasDirectTreeOptimizer(avatarObject)) return true;
 
-            foreach (var component in components) {
-                var content = contentField.GetValue(component);
-                if (content != null && directTreeOptimizerType.IsInstanceOfType(content)) {
-                    return true; // the user already opted in themselves
-                }
-            }
-
-            var added = avatarObject.AddComponent(vrcfuryComponentType);
-            contentField.SetValue(added, Activator.CreateInstance(directTreeOptimizerType));
+            AvatarPipelineCompat.AddDirectTreeOptimizer(avatarObject);
             Log.Info("Full-scope DBT: injected DirectTreeOptimizer — user FX layers are now " +
                      "eligible for blendtree conversion this build.");
             return true;

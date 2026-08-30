@@ -74,8 +74,9 @@ namespace FuryPlusPlus {
         };
 
         internal static void Install(Harmony harmony, VrcfuryCompat compat) {
+            ProgressWindowCompat.EnsureResolved();
             repaintImmediately = ReflectionUtils.Demand(
-                ReflectionUtils.FindNoArgVoid(typeof(EditorWindow), "RepaintImmediately"),
+                ProgressWindowCompat.RepaintImmediately,
                 "EditorWindow.RepaintImmediately()");
             minIntervalTicks = Stopwatch.Frequency / 20;
             mainThreadId = Thread.CurrentThread.ManagedThreadId;

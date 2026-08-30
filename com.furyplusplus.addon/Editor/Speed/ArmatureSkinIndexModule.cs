@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 
@@ -40,33 +39,7 @@ namespace FuryPlusPlus {
 
         [ThreadStatic] private static Context active;
 
-        private static MethodInfo getMutableMesh;
-        private static MethodInfo dirty;
-
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
-            var armatureType = ReflectionUtils.FindType("VF.Service.ArmatureLinkService");
-            var rendererExtensions = ReflectionUtils.FindType("VF.Utils.RendererExtensions");
-            var dirtyUtils = ReflectionUtils.FindType("VF.Utils.DirtyUtils");
-
-            var rewriteSkins = ReflectionUtils.FindUniqueMethod(
-                armatureType,
-                "RewriteSkins",
-                method => method.ReturnType == typeof(void) && method.GetParameters().Length == 3
-            );
-            getMutableMesh = ReflectionUtils.FindMethodWithSignature(
-                rendererExtensions,
-                "GetMutableMesh",
-                typeof(Mesh),
-                typeof(Renderer),
-                typeof(string)
-            );
-            dirty = ReflectionUtils.FindMethodWithSignature(
-                dirtyUtils,
-                "Dirty",
-                typeof(void),
-                typeof(UnityEngine.Object)
-            );
-
             // PORT-NOTE: this used to flush on ObjectMoveService.ApplyDeferred, which VRCFury
             // 1.1370 removed along with the whole deferred-move mechanism (moves are immediate
             // now, and animations retarget through VFResolvedObject instead of path rewrites).
@@ -74,16 +47,11 @@ namespace FuryPlusPlus {
             // GetRootName tests `skin.bones.Contains(...)`, and with several links on one avatar
             // it runs after an earlier link's RewriteSkins. Flushing there keeps every in-Apply
             // read seeing committed bones, so batching stays invisible to VRCFury.
-            var getRootName = ReflectionUtils.FindUniqueMethod(
-                armatureType,
-                "GetRootName",
-                method => method.ReturnType == typeof(string) && method.GetParameters().Length == 2
-            );
-
-            if (!ArmatureCompat.ArmatureLinkAvailable || rewriteSkins == null
-                || getRootName == null || getMutableMesh == null || dirty == null) {
-                throw new InvalidOperationException("target signature mismatch");
-            }
+            ArmatureCompat.DemandArmatureLink();
+            ReflectionUtils.Demand(ArmatureCompat.RewriteSkins, "ArmatureLinkService.RewriteSkins(...)");
+            ReflectionUtils.Demand(ArmatureCompat.GetRootName, "ArmatureLinkService.GetRootName(...)");
+            ReflectionUtils.Demand(ArmatureCompat.GetMutableMesh, "RendererExtensions.GetMutableMesh(...)");
+            ReflectionUtils.Demand(ArmatureCompat.Dirty, "DirtyUtils.Dirty(Object)");
 
             harmony.Patch(
                 ArmatureCompat.ArmatureLinkApply,
@@ -91,11 +59,11 @@ namespace FuryPlusPlus {
                 finalizer: new HarmonyMethod(typeof(ArmatureSkinIndexPatch), nameof(End))
             );
             harmony.Patch(
-                rewriteSkins,
+                ArmatureCompat.RewriteSkins,
                 prefix: new HarmonyMethod(typeof(ArmatureSkinIndexPatch), nameof(RecordRewrite))
             );
             harmony.Patch(
-                getRootName,
+                ArmatureCompat.GetRootName,
                 prefix: new HarmonyMethod(typeof(ArmatureSkinIndexPatch), nameof(Flush))
             );
         }
@@ -180,7 +148,7 @@ namespace FuryPlusPlus {
                 if (!slotsByBone.TryGetValue(rewrite.From, out var slots) || slots.Count == 0) continue;
 
                 if (!changed) {
-                    mesh = ReflectionUtils.InvokeUnwrapped(getMutableMesh, null, new object[] {
+                    mesh = ReflectionUtils.InvokeUnwrapped(ArmatureCompat.GetMutableMesh, null, new object[] {
                         skin,
                         "Needed to change bone bind-poses for Armature Link to re-use bones on base armature"
                     }) as Mesh;
@@ -210,7 +178,7 @@ namespace FuryPlusPlus {
             }
 
             skin.bones = bones;
-            ReflectionUtils.InvokeUnwrapped(dirty, null, new object[] { skin });
+            ReflectionUtils.InvokeUnwrapped(ArmatureCompat.Dirty, null, new object[] { skin });
         }
     }
 }

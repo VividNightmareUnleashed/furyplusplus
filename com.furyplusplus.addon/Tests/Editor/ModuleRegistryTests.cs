@@ -1,5 +1,4 @@
 using System.Linq;
-using System.Reflection;
 using NUnit.Framework;
 
 namespace FuryPlusPlus.Tests.Editor {
@@ -130,10 +129,8 @@ namespace FuryPlusPlus.Tests.Editor {
                 Assert.Ignore("blendshape rewrite module not installed (VRCFury absent or incompatible)");
             }
 
-            var field = typeof(BlendshapeBakeRewritePatch).GetField(
-                "ownerGetPath", BindingFlags.Static | BindingFlags.NonPublic);
-            Assert.That(field, Is.Not.Null);
-            var method = (MethodInfo)field.GetValue(null);
+            BlendshapeOptimizerCompat.EnsureResolved();
+            var method = BlendshapeOptimizerCompat.OwnerGetPath;
             Assert.That(method, Is.Not.Null);
 
             var parameters = method.GetParameters();

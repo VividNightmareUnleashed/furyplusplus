@@ -90,27 +90,11 @@ namespace FuryPlusPlus {
                 "ParamSelectionOptions.allowedMenuTypes");
             ReflectionUtils.Demand(CompressorCompat.CompressorMenuItemGet, "CompressorMenuItem.Get()");
 
-            var vfControllerType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Utils.Controller.VFController"),
-                "VF.Utils.Controller.VFController");
-            const BindingFlags any = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
             controllerLayers = ReflectionUtils.Demand(
-                vfControllerType.GetProperty("layers", any), "VFController.layers");
-            var layerType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Utils.Controller.VFLayer"), "VF.Utils.Controller.VFLayer");
-            // VRCFury 1.1372.0 changed allBehaviours to yield VFBehaviour wrappers rather than
-            // the raw StateMachineBehaviour, so a plain type test against it silently matches
-            // nothing. GetBehaviours<T>() is the typed accessor that still returns the real
-            // behaviours; close it over VRCAvatarParameterDriver once here.
-            // The three-arg FindUniqueMethod filters out generic definitions by design, so the
-            // open generic has to be resolved through the explicit-flags overload.
-            var getBehaviours = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(layerType, "GetBehaviours",
-                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly,
-                    method => method.IsGenericMethodDefinition && method.GetParameters().Length == 0),
-                "VFLayer.GetBehaviours<T>()");
-            layerGetDrivers = getBehaviours.MakeGenericMethod(
-                typeof(VRC.SDK3.Avatars.Components.VRCAvatarParameterDriver));
+                CompressorCompat.ControllerLayers, "VFController.layers");
+            layerGetDrivers = ReflectionUtils.Demand(
+                CompressorCompat.LayerGetDrivers,
+                "VFLayer.GetBehaviours<VRCAvatarParameterDriver>()");
         }
 
         internal static bool Prefix(object __instance, ref object __result) {
@@ -148,7 +132,7 @@ namespace FuryPlusPlus {
             var originalCost = paramz.CalcTotalCost();
             var maxCost = (int)CompressorCompat.GetMaxCost.Invoke(null, null);
             if (originalCost <= maxCost) {
-                return Activator.CreateInstance(CompressorCompat.SolverOutputType);
+                return CompressorCompat.NewSolverOutput();
             }
 
             var addDriven = CollectAddDrivenParams(solver);
@@ -229,9 +213,9 @@ namespace FuryPlusPlus {
                 if (!ok) return null; // stock solver runs and applies its own failure flow
             }
 
-            var output = Activator.CreateInstance(CompressorCompat.SolverOutputType);
+            var output = CompressorCompat.NewSolverOutput();
             CompressorCompat.OutputDecision.SetValue(output, bestDecision);
-            var options = Activator.CreateInstance(CompressorCompat.SelectionOptionsType);
+            var options = CompressorCompat.NewSelectionOptions();
             CompressorCompat.OptionsAllowedMenuTypes.SetValue(options,
                 new List<VRCExpressionsMenu.Control.ControlType>(bestSet));
             CompressorCompat.OutputOptions.SetValue(output, options);

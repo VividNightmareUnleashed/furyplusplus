@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.2.4 — 2026-08-24
+
+Tracks VRCFury 1.1426 and tightens FuryPlusPlus's compatibility boundaries. VRCFury 1.1417-1.1426
+reworked its SPS shader patcher, moved the write-defaults decision into its own build phase, and
+switched many error messages to `GetDebugPath`; the pinned members FuryPlusPlus consumes remain
+compatible. Bake output is unchanged.
+
+- **VRCFury pin → 1.1426.0:** the exact package and runtime compatibility pins move from
+  1.1416.0 to 1.1426.0.
+- **Centralized compatibility surface:** reflection and dynamic construction now live behind
+  subsystem-specific accessors in `Editor/Compat/`, with missing members failing closed.
+- **Safer cross-platform verification:** sidecars use structured JSON, reject invalid blueprint
+  IDs, and hard-fail unreadable or uncertain desktop/mobile layout data.
+- **Lower hot-path overhead:** clip deduplication and SPS probing latch settings at phase
+  boundaries; package identity and large bake orchestration flows have single owners.
+
 ## 1.2.3 — 2026-08-10
 
 Tracks VRCFury 1.1416. VRCFury added an optional debug-path flag to

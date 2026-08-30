@@ -40,21 +40,13 @@ namespace FuryPlusPlus {
         // In-memory mirror of the persisted map, loaded once per domain so repeated
         // probes never read the registry.
         private static SpsProbeResultMap ResultsByKey;
+        private static bool runActive;
 
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
-            var type = ReflectionUtils.FindType("VF.Builder.Haptics.TpsConfigurer");
-            var target = ReflectionUtils.FindMethodWithSignature(
-                type,
-                "HasDpsOrTpsMaterial",
-                typeof(bool),
-                typeof(Renderer)
-            );
-            if (target == null) {
-                throw new InvalidOperationException("target signature mismatch");
-            }
+            SpsCompat.DemandMaterialProbe();
 
             harmony.Patch(
-                target,
+                SpsCompat.HasDpsOrTpsMaterial,
                 prefix: new HarmonyMethod(typeof(SpsMaterialProbeCachePatch), nameof(GetCached)),
                 postfix: new HarmonyMethod(typeof(SpsMaterialProbeCachePatch), nameof(Store))
             );
@@ -64,7 +56,7 @@ namespace FuryPlusPlus {
             harmony.Patch(
                 compatibility.RunMain,
                 prefix: new HarmonyMethod(typeof(SpsMaterialProbeCachePatch), nameof(InvalidateDependencyHashes)),
-                postfix: new HarmonyMethod(typeof(SpsMaterialProbeCachePatch), nameof(FlushResults))
+                finalizer: new HarmonyMethod(typeof(SpsMaterialProbeCachePatch), nameof(RunFinalizer))
             );
         }
 
@@ -79,6 +71,9 @@ namespace FuryPlusPlus {
          */
         private static void InvalidateDependencyHashes(object __0) {
             DependencyHashes.Clear();
+            runActive = SpsMaterialProbeCacheModule.Instance?.Enabled == true;
+            if (!runActive) return;
+            EnsureLoaded();
 
             var avatar = VfGameObjectCompat.Unwrap(__0);
             if (avatar == null) return;
@@ -101,7 +96,7 @@ namespace FuryPlusPlus {
 
         private static bool GetCached(Renderer r, ref bool __result, out string __state) {
             __state = null;
-            if (SpsMaterialProbeCacheModule.Instance?.Enabled != true || r == null) return true;
+            if (!runActive || r == null) return true;
 
             try {
                 var signature = BuildSignature(r.sharedMaterials);
@@ -109,7 +104,6 @@ namespace FuryPlusPlus {
                 var key = Hash128.Compute(signature).ToString();
                 // The signature key is content-derived, so the loaded map stays valid
                 // across bakes and saves a registry read per repeated probe.
-                EnsureLoaded();
                 if (ResultsByKey.TryGet(key, out var cached)) {
                     __result = cached;
                     return false;
@@ -150,6 +144,12 @@ namespace FuryPlusPlus {
             } catch {
                 // Persistence is an optional fast path; VRCFury remains authoritative.
             }
+        }
+
+        private static Exception RunFinalizer(Exception __exception) {
+            runActive = false;
+            FlushResults();
+            return __exception;
         }
 
         private static string BuildSignature(Material[] materials) {

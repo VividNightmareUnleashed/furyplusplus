@@ -60,12 +60,9 @@ namespace FuryPlusPlus {
             ReflectionUtils.Demand(ClipCurveCompat.BindingTryGetCurrentFloat,
                 "VFBinding.TryGetCurrentFloat(root, out value)");
 
-            var fixWdType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Service.FixWriteDefaultsService"), "VF.Service.FixWriteDefaultsService");
+            ToggleTreeCompat.EnsureResolved();
             getDefaultClip = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(fixWdType, "GetDefaultClip",
-                    method => method.GetParameters().Length == 0),
-                "FixWriteDefaultsService.GetDefaultClip()");
+                ToggleTreeCompat.GetDefaultClip, "FixWriteDefaultsService.GetDefaultClip()");
         }
 
         internal static void Run() {

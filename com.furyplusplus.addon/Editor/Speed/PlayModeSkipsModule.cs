@@ -53,27 +53,18 @@ namespace FuryPlusPlus {
     internal static class PlayModeSkipsPatch {
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
             UploadCompat.DemandCore();
-            var mipmapApply = ReflectionUtils.FindNoArgVoid(
-                ReflectionUtils.FindType("VF.Service.FixMipmapStreamingService"), "Apply");
-            var menuIconApply = ReflectionUtils.FindNoArgVoid(
-                ReflectionUtils.FindType("VF.Service.FixMenuIconTexturesService"), "Apply");
-            var validationApply = ReflectionUtils.FindNoArgVoid(
-                ReflectionUtils.FindType("VF.Service.FinalValidationService"), "Apply");
-
-            if (mipmapApply == null || menuIconApply == null || validationApply == null) {
-                throw new InvalidOperationException("target signature mismatch");
-            }
+            PlayModeCompat.DemandCore();
 
             harmony.Patch(
-                mipmapApply,
+                PlayModeCompat.MipmapApply,
                 prefix: new HarmonyMethod(typeof(PlayModeSkipsPatch), nameof(SkipMipmap))
             );
             harmony.Patch(
-                menuIconApply,
+                PlayModeCompat.MenuIconApply,
                 prefix: new HarmonyMethod(typeof(PlayModeSkipsPatch), nameof(SkipMenuIcons))
             );
             harmony.Patch(
-                validationApply,
+                PlayModeCompat.ValidationApply,
                 prefix: new HarmonyMethod(typeof(PlayModeSkipsPatch), nameof(SkipValidation))
             );
         }

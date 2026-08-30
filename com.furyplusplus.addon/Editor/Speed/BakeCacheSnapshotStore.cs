@@ -56,7 +56,6 @@ namespace FuryPlusPlus {
         }
 
         private static bool bootstrapScheduled;
-        private static string addonVersion;
 
         internal static bool IsMounted => AssetDatabase.IsValidFolder(PackageAssetRoot);
 
@@ -198,12 +197,7 @@ namespace FuryPlusPlus {
                 Progress("Collecting transient bake outputs…", 0.15f);
 
                 var cloneRoot = clone.transform;
-                var components = new List<Object>();
-                foreach (var component in clone.GetComponentsInChildren<Component>(true)) {
-                    // Transforms serialize only parent/children/GO — and the clone root's
-                    // m_Father is the capture holder, which must not look like an external ref.
-                    if (component != null && !(component is Transform)) components.Add(component);
-                }
+                var components = CollectSerializableComponents(clone);
                 var walk = ObjectGraphCloner.Walk(
                     components, obj => Classify(obj, cloneRoot), CanHoldReferences);
                 Phase("walk");
@@ -224,36 +218,8 @@ namespace FuryPlusPlus {
                     }
                     AssetDatabase.CreateFolder(SnapshotsFolder, key);
 
-                    var textureCount = 0;
-                    var containerCount = 0;
-                    AssetDatabase.StartAssetEditing(); // batch imports; Stop flushes them once
-                    try {
-                        BakeCacheContainer container = null;
-                        var inContainer = 0;
-                        foreach (var original in walk.ToClone) {
-                            var copy = map[original];
-                            // Texture2Ds get their own files (NDMF's pattern: big binary blobs
-                            // inside shared containers make every container reimport slow).
-                            if (copy is Texture2D) {
-                                AssetDatabase.CreateAsset(copy,
-                                    $"{folder}/tex-{textureCount:000}-{BakeFingerprint.SanitizeKey(copy.name)}.asset");
-                                textureCount++;
-                                continue;
-                            }
-                            if (container == null || inContainer >= MaxObjectsPerContainer) {
-                                container = ScriptableObject.CreateInstance<BakeCacheContainer>();
-                                container.name = $"container-{containerCount:000}";
-                                AssetDatabase.CreateAsset(container,
-                                    $"{folder}/container-{containerCount:000}.asset");
-                                containerCount++;
-                                inContainer = 0;
-                            }
-                            AssetDatabase.AddObjectToAsset(copy, container);
-                            inContainer++;
-                        }
-                    } finally {
-                        AssetDatabase.StopAssetEditing();
-                    }
+                    PersistCopies(folder, walk.ToClone, map,
+                        out var containerCount, out var textureCount);
                     AssetDatabase.SaveAssets();
                     Phase("persist");
                     Progress("Rewiring references onto the snapshot…", 0.65f);
@@ -275,12 +241,7 @@ namespace FuryPlusPlus {
                     // Verification: every outgoing reference of every saved object must land
                     // on a persisted, non-transient asset (or inside the prefab itself) — a
                     // missed transient would silently break the replayed avatar next session.
-                    var verifyRoots = new List<Object>();
-                    foreach (var component in prefab.GetComponentsInChildren<Component>(true)) {
-                        if (component != null && !(component is Transform)) verifyRoots.Add(component);
-                    }
-                    verifyRoots.AddRange(map.Values);
-                    var leaks = ObjectGraphCloner.Walk(verifyRoots, VerifyClassify, CanHoldReferences);
+                    var leaks = VerifySnapshot(prefab, map.Values);
                     Phase("verify");
                     if (leaks.HasRejections) {
                         AssetDatabase.DeleteAsset(folder);
@@ -289,25 +250,8 @@ namespace FuryPlusPlus {
                         return false;
                     }
 
-                    var compat = Bootstrap.Compat;
-                    var meta = new SnapshotMeta {
-                        formatVersion = SnapshotFormatVersion,
-                        hierarchyHash = fingerprint.HierarchyHash,
-                        assetsHash = fingerprint.AssetsHash,
-                        configHash = fingerprint.ConfigHash,
-                        generatedHash = fingerprint.GeneratedHash,
-                        addonVersion = AddonVersion,
-                        vrcfuryVersion = compat?.PackageVersion,
-                        vrcfuryMvid = compat?.ModuleVersionId.ToString(),
-                        unityVersion = Application.unityVersion,
-                        createdUtc = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
-                        chainSeconds = chainSeconds,
-                        clonedObjects = walk.ToClone.Count,
-                        containerCount = containerCount,
-                        textureCount = textureCount,
-                    };
-                    File.WriteAllText(Path.GetFullPath(folder + "/snapshot.json"),
-                        JsonUtility.ToJson(meta, true));
+                    WriteMetadata(folder, fingerprint, chainSeconds, walk.ToClone.Count,
+                        containerCount, textureCount);
                     timer.Stop();
                     Log.Info($"Bake cache: captured snapshot for '{clone.name}' in " +
                              $"{timer.Elapsed.TotalSeconds:F1}s ({walk.ToClone.Count} transient " +
@@ -335,6 +279,95 @@ namespace FuryPlusPlus {
                 if (holder != null) Object.DestroyImmediate(holder);
                 EditorUtility.ClearProgressBar();
             }
+        }
+
+        private static List<Object> CollectSerializableComponents(GameObject root) {
+            var components = new List<Object>();
+            foreach (var component in root.GetComponentsInChildren<Component>(true)) {
+                // Transforms serialize only parent/children/GO. The clone root's parent is
+                // the temporary capture holder, so it must not enter the dependency walk.
+                if (component != null && !(component is Transform)) components.Add(component);
+            }
+            return components;
+        }
+
+        private static void PersistCopies(
+            string folder,
+            IReadOnlyList<Object> originals,
+            IReadOnlyDictionary<Object, Object> copies,
+            out int containerCount,
+            out int textureCount
+        ) {
+            containerCount = 0;
+            textureCount = 0;
+            AssetDatabase.StartAssetEditing();
+            try {
+                BakeCacheContainer container = null;
+                var inContainer = 0;
+                foreach (var original in originals) {
+                    var copy = copies[original];
+                    // Keep large texture blobs separate so adding one does not reimport a
+                    // shared container holding hundreds of unrelated objects.
+                    if (copy is Texture2D) {
+                        AssetDatabase.CreateAsset(copy,
+                            $"{folder}/tex-{textureCount:000}-" +
+                            $"{BakeFingerprint.SanitizeKey(copy.name)}.asset");
+                        textureCount++;
+                        continue;
+                    }
+                    if (container == null || inContainer >= MaxObjectsPerContainer) {
+                        container = ScriptableObject.CreateInstance<BakeCacheContainer>();
+                        container.name = $"container-{containerCount:000}";
+                        AssetDatabase.CreateAsset(container,
+                            $"{folder}/container-{containerCount:000}.asset");
+                        containerCount++;
+                        inContainer = 0;
+                    }
+                    AssetDatabase.AddObjectToAsset(copy, container);
+                    inContainer++;
+                }
+            } finally {
+                AssetDatabase.StopAssetEditing();
+            }
+        }
+
+        private static ObjectGraphCloner.WalkResult VerifySnapshot(
+            GameObject prefab,
+            IEnumerable<Object> persistedCopies
+        ) {
+            var roots = CollectSerializableComponents(prefab);
+            roots.AddRange(persistedCopies);
+            return ObjectGraphCloner.Walk(roots, VerifyClassify, CanHoldReferences);
+        }
+
+        private static void WriteMetadata(
+            string folder,
+            BakeFingerprint.Result fingerprint,
+            double chainSeconds,
+            int clonedObjects,
+            int containerCount,
+            int textureCount
+        ) {
+            var compat = Bootstrap.Compat;
+            var meta = new SnapshotMeta {
+                formatVersion = SnapshotFormatVersion,
+                hierarchyHash = fingerprint.HierarchyHash,
+                assetsHash = fingerprint.AssetsHash,
+                configHash = fingerprint.ConfigHash,
+                generatedHash = fingerprint.GeneratedHash,
+                addonVersion = PackageIdentity.Version,
+                vrcfuryVersion = compat?.PackageVersion,
+                vrcfuryMvid = compat?.ModuleVersionId.ToString(),
+                unityVersion = Application.unityVersion,
+                createdUtc = DateTime.UtcNow.ToString(
+                    "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+                chainSeconds = chainSeconds,
+                clonedObjects = clonedObjects,
+                containerCount = containerCount,
+                textureCount = textureCount,
+            };
+            File.WriteAllText(Path.GetFullPath(folder + "/snapshot.json"),
+                JsonUtility.ToJson(meta, true));
         }
 
         /** Native modal bar — the only UI that reliably renders inside a blocking editor op. */
@@ -385,20 +418,6 @@ namespace FuryPlusPlus {
          */
         private static bool CanHoldReferences(Object obj) {
             return !(obj is Mesh || obj is Texture);
-        }
-
-        private static string AddonVersion {
-            get {
-                if (addonVersion == null) {
-                    try {
-                        addonVersion = UnityEditor.PackageManager.PackageInfo
-                            .FindForAssembly(typeof(BakeCacheSnapshotStore).Assembly)?.version ?? "unknown";
-                    } catch {
-                        addonVersion = "unknown";
-                    }
-                }
-                return addonVersion;
-            }
         }
 
         private static ObjectGraphCloner.RefKind Classify(Object obj, Transform cloneRoot) {

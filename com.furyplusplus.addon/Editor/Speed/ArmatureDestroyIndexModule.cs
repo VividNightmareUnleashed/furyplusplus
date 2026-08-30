@@ -2,7 +2,6 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 using Object = UnityEngine.Object;
@@ -30,11 +29,6 @@ namespace FuryPlusPlus {
     }
 
     internal static class ArmatureDestroyIndexPatch {
-        private sealed class CategoryTarget {
-            internal Type ComponentType;
-            internal MethodInfo GetRootTransform;
-        }
-
         private sealed class IndexedComponent {
             internal int Order;
             internal Component Component;
@@ -49,31 +43,19 @@ namespace FuryPlusPlus {
 
         [ThreadStatic] private static Context active;
 
-        private static MethodInfo getUploadRoots;
-        private static MethodInfo destroyConstraint;
-        private static CategoryTarget[] categoryTargets;
+        private static ArmatureCompat.DestroyCategoryMembers[] categoryTargets;
 
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
-            var constraintType = ReflectionUtils.FindType("VF.Utils.VFConstraint");
-
-            var destroy = ReflectionUtils.FindNoArgVoid(ArmatureCompat.VfGameObjectType, "Destroy");
-            getUploadRoots = ArmatureCompat.VfGameObjectType?
-                .GetProperty("uploadRoots", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-                ?.GetGetMethod(true);
-            destroyConstraint = ReflectionUtils.FindNoArgVoid(constraintType, "Destroy");
-
-            categoryTargets = new[] {
-                CreateCategoryTarget("VRC.Dynamics.VRCPhysBoneBase"),
-                CreateCategoryTarget("VRC.Dynamics.VRCPhysBoneColliderBase"),
-                CreateCategoryTarget("VRC.Dynamics.ContactBase")
-            };
-
-            if (!ArmatureCompat.ArmatureLinkAvailable || destroy == null
-                || ArmatureCompat.GetConstraintsMethod == null || constraintType == null
-                || getUploadRoots == null || destroyConstraint == null
-                || categoryTargets.Any(target => target == null)) {
+            categoryTargets = ArmatureCompat.DestroyCategories;
+            if (!ArmatureCompat.ArmatureLinkAvailable
+                || ArmatureCompat.GetConstraintsMethod == null
+                || ArmatureCompat.ConstraintType == null
+                || ArmatureCompat.VfDestroy == null
+                || ArmatureCompat.VfGetUploadRoots == null
+                || ArmatureCompat.ConstraintDestroy == null
+                || categoryTargets == null || categoryTargets.Any(target => target == null)) {
                 categoryTargets = null;
-                throw new InvalidOperationException("target signature mismatch");
+                throw new MissingMemberException("VRCFury armature destroy surface is incomplete");
             }
 
             harmony.Patch(
@@ -82,26 +64,9 @@ namespace FuryPlusPlus {
                 finalizer: new HarmonyMethod(typeof(ArmatureDestroyIndexPatch), nameof(End))
             );
             harmony.Patch(
-                destroy,
+                ArmatureCompat.VfDestroy,
                 prefix: new HarmonyMethod(typeof(ArmatureDestroyIndexPatch), nameof(Destroy))
             );
-        }
-
-        private static CategoryTarget CreateCategoryTarget(string typeName) {
-            var componentType = ReflectionUtils.FindType(typeName);
-            if (componentType == null || !typeof(Component).IsAssignableFrom(componentType)) return null;
-
-            var root = ReflectionUtils.FindMethodWithSignature(
-                componentType,
-                "GetRootTransform",
-                typeof(Transform)
-            );
-            if (root == null) return null;
-
-            return new CategoryTarget {
-                ComponentType = componentType,
-                GetRootTransform = root
-            };
         }
 
         private static void Begin(object __instance) {
@@ -178,7 +143,7 @@ namespace FuryPlusPlus {
                 throw new InvalidOperationException("VRCFury GetConstraints returned a non-enumerable result.");
             }
             foreach (var constraint in constraints) {
-                ReflectionUtils.InvokeUnwrapped(destroyConstraint, constraint, null);
+                ReflectionUtils.InvokeUnwrapped(ArmatureCompat.ConstraintDestroy, constraint, null);
             }
 
             Object.DestroyImmediate(targetObject);
@@ -186,7 +151,8 @@ namespace FuryPlusPlus {
         }
 
         private static List<GameObject> ReadUploadRoots(object vfGameObject) {
-            var roots = ReflectionUtils.InvokeUnwrapped(getUploadRoots, vfGameObject, null) as IEnumerable;
+            var roots = ReflectionUtils.InvokeUnwrapped(
+                ArmatureCompat.VfGetUploadRoots, vfGameObject, null) as IEnumerable;
             if (roots == null) return null;
 
             var output = new List<GameObject>();

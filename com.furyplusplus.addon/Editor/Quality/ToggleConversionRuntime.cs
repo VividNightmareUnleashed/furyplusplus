@@ -271,7 +271,7 @@ namespace FuryPlusPlus {
         /** True when every curve in the motion is a plain float curve (no material swaps, no AAPs). */
         internal static bool MotionIsPlainFloat(object motion) {
             if (motion == null) return true;
-            var iterator = Activator.CreateInstance(ToggleTreeCompat.ClipsIteratorType);
+            var iterator = ToggleTreeCompat.NewClipsIterator();
             foreach (var clip in (IEnumerable)ReflectionUtils.InvokeUnwrapped(
                          ToggleTreeCompat.ClipsFromMotion, iterator, new[] { motion })) {
                 if (clip == null) continue;

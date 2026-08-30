@@ -40,6 +40,9 @@ namespace FuryPlusPlus {
         internal static MethodInfo ClipIsLooping;           // VFClip.IsLooping()
         internal static MethodInfo ClipGetAdditiveRefPose;  // VFClip.GetAdditiveReferencePoseClip()
         internal static FieldInfo ClipFrameRate;            // VFClip.frameRate
+        internal static PropertyInfo SaveContextBindingRoot;
+        internal static PropertyInfo SaveContextReuseSource;
+        internal static MethodInfo ClipSave;
 
         // ---- curve tuple: (VFBinding, FloatOrObjectCurve) ----
         internal static Type CurveTupleType;
@@ -108,6 +111,21 @@ namespace FuryPlusPlus {
                     "GetAdditiveReferencePoseClip", method => method.GetParameters().Length == 0);
                 ClipFrameRate = ClipType.GetField("frameRate",
                     BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            }
+
+            var saveContextType = ReflectionUtils.FindType("VF.Utils.Controller.VFSaveContext");
+            if (saveContextType != null) {
+                const BindingFlags instance =
+                    BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+                SaveContextBindingRoot = saveContextType.GetProperty("BindingRoot", instance);
+                SaveContextReuseSource = saveContextType.GetProperty("ReuseSourceAssets", instance);
+                ClipSave = ClipType == null ? null : ReflectionUtils.FindUniqueMethod(
+                    ClipType,
+                    "Save",
+                    method => method.GetParameters().Length == 1
+                              && method.GetParameters()[0].ParameterType == saveContextType
+                              && typeof(Motion).IsAssignableFrom(method.ReturnType)
+                );
             }
 
             CurveTupleType = ClipGetAllCurves?.ReturnType.GetElementType();

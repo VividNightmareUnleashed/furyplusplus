@@ -1,6 +1,5 @@
 using System;
 using System.Linq;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 using HarmonyLib;
 using UnityEditor;
@@ -67,21 +66,13 @@ namespace FuryPlusPlus {
         private static bool liveTimingsSnapshot;
 
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
-            var windowType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.VRCFProgressWindow"),
-                "VF.VRCFProgressWindow"
-            );
+            ProgressWindowCompat.EnsureResolved();
             var create = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(
-                    windowType, "Create",
-                    method => method.IsStatic && method.GetParameters().Length == 0
-                ),
+                ProgressWindowCompat.Create,
                 "VRCFProgressWindow.Create()"
             );
             var progress = ReflectionUtils.Demand(
-                ReflectionUtils.FindMethodWithSignature(
-                    windowType, "Progress", typeof(void), typeof(float), typeof(string)
-                ),
+                ProgressWindowCompat.Progress,
                 "VRCFProgressWindow.Progress(float, string)"
             );
 

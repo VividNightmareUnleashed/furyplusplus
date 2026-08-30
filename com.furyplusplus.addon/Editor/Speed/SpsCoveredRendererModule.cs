@@ -49,49 +49,24 @@ namespace FuryPlusPlus {
         }
 
         [ThreadStatic] private static Context active;
-        private static Type plugComponentType;
         internal static string LastStats { get; private set; } = "none";
         internal static int LastSkipped { get; private set; }
         internal static int LastProbes { get; private set; }
 
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
-            var upgraderType = ReflectionUtils.FindType("VF.Builder.Haptics.SpsUpgrader");
-            var plugEditorType = ReflectionUtils.FindType("VF.Inspector.VRCFuryHapticPlugEditor");
-            var sizeDetectorType = ReflectionUtils.FindType("VF.Builder.Haptics.PlugSizeDetector");
-            plugComponentType = ReflectionUtils.FindType("VF.Component.VRCFuryHapticPlug");
-
-            var apply = ReflectionUtils.FindUniqueMethod(
-                upgraderType,
-                "Apply",
-                method => method.GetParameters().Length == 3
-            );
-            var getRenderers = ReflectionUtils.FindUniqueMethod(
-                plugEditorType,
-                "GetRenderers",
-                method => method.GetParameters().Length == 1
-            );
-            var getAutoWorldSize = ReflectionUtils.FindUniqueMethod(
-                sizeDetectorType,
-                "GetAutoWorldSize",
-                method => method.GetParameters().Length == 1
-                          && method.GetParameters()[0].ParameterType == typeof(Renderer)
-            );
-
-            if (apply == null || getRenderers == null || getAutoWorldSize == null || plugComponentType == null) {
-                throw new InvalidOperationException("target signature mismatch");
-            }
+            SpsCompat.DemandCoveredRenderer();
 
             harmony.Patch(
-                apply,
+                SpsCompat.UpgraderApply,
                 prefix: new HarmonyMethod(typeof(SpsCoveredRendererPatch), nameof(Begin)),
                 finalizer: new HarmonyMethod(typeof(SpsCoveredRendererPatch), nameof(End))
             );
             harmony.Patch(
-                getRenderers,
+                SpsCompat.GetRenderers,
                 postfix: new HarmonyMethod(typeof(SpsCoveredRendererPatch), nameof(CaptureRenderers))
             );
             harmony.Patch(
-                getAutoWorldSize,
+                SpsCompat.GetAutoWorldSize,
                 prefix: new HarmonyMethod(typeof(SpsCoveredRendererPatch), nameof(SkipCovered))
             );
         }
@@ -146,13 +121,13 @@ namespace FuryPlusPlus {
                 // GetRenderers pass. Include those live components as well, and remember
                 // them so other renderers under the same plug take the list path above.
                 for (var current = owner; current != null; current = current.parent) {
-                    if (current.GetComponent(plugComponentType) != null) {
+                    if (current.GetComponent(SpsCompat.PlugComponentType) != null) {
                         context.AddOwner(current);
                         context.Skipped++;
                         return false;
                     }
                 }
-                var childPlug = owner.GetComponentInChildren(plugComponentType, true);
+                var childPlug = owner.GetComponentInChildren(SpsCompat.PlugComponentType, true);
                 if (childPlug != null) {
                     context.AddOwner(childPlug.transform);
                     context.Skipped++;

@@ -94,15 +94,12 @@ namespace FuryPlusPlus {
 
         private static string DirPath => BakeFingerprint.DirPath;
 
-        private static Type vrcfuryTestType;
-
         internal static void Install(Harmony harmony) {
             // Anchored on VRCFuryBuilder.RunMain: play-mode bakes reach it through EVERY
             // initiator (SDK callbacks, Gesture Manager, Av3Emu, NDMF apply-on-play),
             // unlike any single outer entrypoint. The fingerprint therefore measures
             // "would VRCFury's main build have been skippable" — the dominant bake cost.
-            vrcfuryTestType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Model.VRCFuryTest"), "VF.Model.VRCFuryTest");
+            AvatarPipelineCompat.DemandVrcfuryTestMarker();
             UploadCompat.DemandCore();
             VfGameObjectCompat.DemandCore();
             var runMain = ReflectionUtils.Demand(Bootstrap.Compat?.RunMain, "VRCFuryBuilder.RunMain");
@@ -131,7 +128,7 @@ namespace FuryPlusPlus {
                 if (avatarObject == null) return;
                 // A post-bake fingerprint is garbage (random [VF###] names, regenerated
                 // container fileIDs) and must never overwrite the record.
-                if (avatarObject.GetComponent(vrcfuryTestType) != null) return;
+                if (AvatarPipelineCompat.VrcfuryRanOn(avatarObject)) return;
 
                 var hashTimer = System.Diagnostics.Stopwatch.StartNew();
                 var fingerprint = BakeFingerprint.Compute(avatarObject, "");

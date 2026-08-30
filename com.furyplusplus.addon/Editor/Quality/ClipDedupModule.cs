@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using System.Text;
 using HarmonyLib;
 using UnityEditor;
@@ -59,15 +58,13 @@ namespace FuryPlusPlus {
         internal static string LastStats;
         internal static int LastDuplicates;
 
-        private static PropertyInfo contextBindingRoot;   // VFSaveContext.BindingRoot
-        private static PropertyInfo contextReuseSource;   // VFSaveContext.ReuseSourceAssets
-
         // One save context == one controller == one output asset file, so the canonical
         // table is scoped to it. Contexts never interleave (Save is a depth-first walk).
         [ThreadStatic] private static object activeContext;
         [ThreadStatic] private static Dictionary<string, Motion> canonicalByHash;
         [ThreadStatic] private static Dictionary<object, string> pendingHash;
         [ThreadStatic] private static int duplicates;
+        [ThreadStatic] private static bool enabledForContext;
 
         internal static void Install(Harmony harmony) {
             ClipCurveCompat.DemandCore();
@@ -83,22 +80,12 @@ namespace FuryPlusPlus {
                 "VFBinding.ToEditorCurveBinding(root)");
             ReflectionUtils.Demand(ClipCurveCompat.CurveObjectCurve, "FloatOrObjectCurve.ObjectCurve");
 
-            var contextType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Utils.Controller.VFSaveContext"),
-                "VF.Utils.Controller.VFSaveContext");
-            const BindingFlags instance =
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-            contextBindingRoot = ReflectionUtils.Demand(
-                contextType.GetProperty("BindingRoot", instance), "VFSaveContext.BindingRoot");
-            contextReuseSource = ReflectionUtils.Demand(
-                contextType.GetProperty("ReuseSourceAssets", instance), "VFSaveContext.ReuseSourceAssets");
-
             var save = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(ClipCurveCompat.ClipType, "Save",
-                    method => method.GetParameters().Length == 1
-                              && method.GetParameters()[0].ParameterType == contextType
-                              && typeof(Motion).IsAssignableFrom(method.ReturnType)),
+                ClipCurveCompat.ClipSave,
                 "VFClip.Save(VFSaveContext)");
+            ReflectionUtils.Demand(ClipCurveCompat.SaveContextBindingRoot, "VFSaveContext.BindingRoot");
+            ReflectionUtils.Demand(ClipCurveCompat.SaveContextReuseSource,
+                "VFSaveContext.ReuseSourceAssets");
 
             harmony.Patch(
                 save,
@@ -109,16 +96,18 @@ namespace FuryPlusPlus {
 
         /** False = a content-equal clip already saved; hand back its asset and skip the write. */
         private static bool SavePrefix(object __instance, object __0, ref Motion __result) {
-            if (ClipDedupModule.Instance?.Enabled != true) return true;
-
             string hash;
             try {
                 if (!ReferenceEquals(activeContext, __0)) {
                     activeContext = __0;
-                    canonicalByHash = new Dictionary<string, Motion>(StringComparer.Ordinal);
-                    pendingHash = new Dictionary<object, string>();
+                    enabledForContext = ClipDedupModule.Instance?.Enabled == true;
+                    canonicalByHash = enabledForContext
+                        ? new Dictionary<string, Motion>(StringComparer.Ordinal)
+                        : null;
+                    pendingHash = enabledForContext ? new Dictionary<object, string>() : null;
                     duplicates = 0;
                 }
+                if (!enabledForContext) return true;
                 if (!IsEligible(__instance, __0)) return true;
                 hash = HashClip(__instance, __0);
                 if (hash == null) return true;
@@ -153,15 +142,15 @@ namespace FuryPlusPlus {
          */
         private static bool IsEligible(object clip, object context) {
             if (ClipCurveCompat.IsProxyClip(clip)) return false;
-            if (!(contextReuseSource.GetValue(context) is bool reuse) || !reuse) return true;
-            var bindingRoot = contextBindingRoot.GetValue(context);
+            if (!(ClipCurveCompat.SaveContextReuseSource.GetValue(context) is bool reuse) || !reuse) return true;
+            var bindingRoot = ClipCurveCompat.SaveContextBindingRoot.GetValue(context);
             if (bindingRoot == null) return false;
             return ClipCurveCompat.GetUseOriginalUserClip(clip, bindingRoot) == null;
         }
 
         /** Null = the clip cannot be hashed faithfully; leave it out of the dedup. */
         private static string HashClip(object clip, object context) {
-            var bindingRoot = contextBindingRoot.GetValue(context);
+            var bindingRoot = ClipCurveCompat.SaveContextBindingRoot.GetValue(context);
             if (bindingRoot == null) return null;
 
             var builder = new StringBuilder();

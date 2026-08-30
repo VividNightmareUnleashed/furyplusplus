@@ -321,12 +321,8 @@ namespace FuryPlusPlus {
             for (var pass = 0; remaining.Count > 0 && pass < 16; pass++) {
                 var required = new HashSet<Type>();
                 foreach (var component in remaining) {
-                    foreach (var attribute in component.GetType()
-                                 .GetCustomAttributes(typeof(RequireComponent), true)) {
-                        var require = (RequireComponent)attribute;
-                        if (require.m_Type0 != null) required.Add(require.m_Type0);
-                        if (require.m_Type1 != null) required.Add(require.m_Type1);
-                        if (require.m_Type2 != null) required.Add(require.m_Type2);
+                    foreach (var type in ComponentCompat.RequiredComponentTypes(component)) {
+                        required.Add(type);
                     }
                 }
                 var destroyedAny = false;

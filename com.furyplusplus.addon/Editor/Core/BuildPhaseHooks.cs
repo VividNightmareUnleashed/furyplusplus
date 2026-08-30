@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using HarmonyLib;
 
 namespace FuryPlusPlus {
@@ -28,12 +27,6 @@ namespace FuryPlusPlus {
         private static readonly List<Hook> Hooks = new List<Hook>();
         private static bool installed;
         private static bool runActive;
-        private static Type featureOrderType;
-        private static MethodInfo actionGetPriorty;
-        private static MethodInfo actionGetService;
-        private static MethodInfo getInjector;
-        private static MethodInfo injectorGetService;
-        private static Type injectorContextType;
         private static UnityEngine.GameObject currentAvatarRoot;
 
         internal static bool Installed => installed;
@@ -51,13 +44,7 @@ namespace FuryPlusPlus {
                 var descriptor = currentAvatarRoot
                     .GetComponent<VRC.SDK3.Avatars.Components.VRCAvatarDescriptor>();
                 if (descriptor == null) return null;
-                var injector = getInjector.Invoke(null, new object[] { descriptor });
-                if (injector == null) return null;
-                var serviceType = ReflectionUtils.FindType(typeFullName);
-                if (serviceType == null) return null;
-                return injectorGetService.Invoke(injector, new[] {
-                    serviceType, Activator.CreateInstance(injectorContextType)
-                });
+                return BuildPhaseCompat.GetService(descriptor, typeFullName);
             } catch {
                 return null;
             }
@@ -67,42 +54,8 @@ namespace FuryPlusPlus {
             installed = false;
             Hooks.Clear();
 
-            featureOrderType = ReflectionUtils.Demand(
-                compat.AvatarsEditorAssembly.GetType("VF.Feature.Base.FeatureOrder", false),
-                "VF.Feature.Base.FeatureOrder"
-            );
-            var actionType = ReflectionUtils.Demand(
-                compat.AvatarsEditorAssembly.GetType("VF.Feature.Base.FeatureBuilderAction", false),
-                "VF.Feature.Base.FeatureBuilderAction"
-            );
-            // VRCFury's typo: the getter really is named GetPriorty.
-            actionGetPriorty = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(
-                    actionType,
-                    "GetPriorty",
-                    method => method.GetParameters().Length == 0 && method.ReturnType.IsEnum
-                ),
-                "FeatureBuilderAction.GetPriorty()"
-            );
-            actionGetService = compat.ActionGetService;
-
+            BuildPhaseCompat.Resolve(compat);
             VfGameObjectCompat.DemandCore();
-            var injectorBuilderType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Builder.VRCFuryInjectorBuilder"),
-                "VF.Builder.VRCFuryInjectorBuilder");
-            getInjector = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(injectorBuilderType, "GetInjector",
-                    method => method.IsStatic && method.GetParameters().Length == 1),
-                "VRCFuryInjectorBuilder.GetInjector(...)");
-            var injectorType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Injector.VRCFuryInjector"), "VF.Injector.VRCFuryInjector");
-            // The non-generic resolver is private GetService(Type, Context = default).
-            injectorGetService = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(injectorType, "GetService",
-                    method => method.GetParameters().Length == 2
-                              && method.GetParameters()[0].ParameterType == typeof(Type)),
-                "VRCFuryInjector.GetService(Type, Context)");
-            injectorContextType = injectorGetService.GetParameters()[1].ParameterType;
 
             harmony.Patch(
                 compat.RunMain,
@@ -133,12 +86,7 @@ namespace FuryPlusPlus {
             if (!installed) {
                 throw new InvalidOperationException("BuildPhaseHooks is not installed");
             }
-            int threshold;
-            try {
-                threshold = Convert.ToInt32(Enum.Parse(featureOrderType, phaseName));
-            } catch (Exception) {
-                throw new MissingMemberException("VRCFury member not found: FeatureOrder." + phaseName);
-            }
+            var threshold = BuildPhaseCompat.GetThreshold(phaseName);
             Hooks.Add(new Hook {
                 ModuleId = moduleId,
                 PhaseName = phaseName,
@@ -174,7 +122,7 @@ namespace FuryPlusPlus {
 
             int priority;
             try {
-                priority = Convert.ToInt32(actionGetPriorty.Invoke(__instance, null));
+                priority = BuildPhaseCompat.GetPriority(__instance);
             } catch {
                 // Never break the build over dispatch bookkeeping.
                 return;
@@ -189,7 +137,7 @@ namespace FuryPlusPlus {
                 if (!atBoundary) continue;
                 if (!serviceFetched) {
                     try {
-                        service = actionGetService.Invoke(__instance, null);
+                        service = BuildPhaseCompat.GetActionService(__instance);
                     } catch {
                         return;
                     }

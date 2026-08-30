@@ -25,17 +25,45 @@ namespace FuryPlusPlus {
             public int compressorAlgoVersion;
         }
 
+        [Serializable]
+        private class VrcfurySavedData {
+            public List<VrcfurySavedParam> parameters;
+        }
+
+        [Serializable]
+        private struct VrcfurySavedParam {
+            public bool compressed;
+        }
+
         internal const int AlgorithmVersion = 1;
 
         /** Bump when the lane-packing/sub-8 batch geometry algorithm changes shape. */
         internal const int CompressorAlgoVersion = 1;
 
-        private static string DirPath => Path.Combine(
+        internal static string SidecarDirectoryOverride;
+        internal static string VrcfuryDesktopDirectoryOverride;
+
+        private static string DirPath => SidecarDirectoryOverride ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "FuryPlusPlus", "SyncData");
 
+        private static string VrcfuryDesktopDirPath => VrcfuryDesktopDirectoryOverride ?? Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "VRCFury", "DesktopSyncData");
+
         private static string FileFor(string blueprintId) {
+            if (!IsValidBlueprintId(blueprintId)) return null;
             return Path.Combine(DirPath, blueprintId + ".json");
+        }
+
+        internal static bool IsValidBlueprintId(string blueprintId) {
+            return !string.IsNullOrWhiteSpace(blueprintId)
+                   && blueprintId != "."
+                   && blueprintId != ".."
+                   && !Path.IsPathRooted(blueprintId)
+                   && blueprintId.IndexOf('/') < 0
+                   && blueprintId.IndexOf('\\') < 0
+                   && blueprintId.IndexOfAny(Path.GetInvalidFileNameChars()) < 0;
         }
 
         /**
@@ -58,12 +86,18 @@ namespace FuryPlusPlus {
             IEnumerable<string> strippedParams,
             IEnumerable<string> narrowedParams = null
         ) {
-            if (string.IsNullOrEmpty(blueprintId)) return;
+            var file = FileFor(blueprintId);
+            if (file == null) {
+                if (!string.IsNullOrEmpty(blueprintId)) {
+                    Log.Warn("Could not save cross-platform sync data: invalid blueprint ID.");
+                }
+                return;
+            }
             try {
                 Directory.CreateDirectory(DirPath);
                 var compressor = CurrentCompressorInputs();
                 var data = new SavedData {
-                    addonVersion = "0.1.0",
+                    addonVersion = PackageIdentity.Version,
                     algorithmVersion = AlgorithmVersion,
                     strippedParams = strippedParams.OrderBy(name => name, StringComparer.Ordinal).ToList(),
                     narrowedParams = (narrowedParams ?? Enumerable.Empty<string>())
@@ -72,15 +106,15 @@ namespace FuryPlusPlus {
                     compressorSub8List = compressor.Sub8List,
                     compressorAlgoVersion = CompressorAlgoVersion
                 };
-                File.WriteAllText(FileFor(blueprintId), JsonUtility.ToJson(data, true));
+                File.WriteAllText(file, JsonUtility.ToJson(data, true));
             } catch (Exception e) {
                 Log.Warn("Could not save cross-platform sync data: " + e.Message);
             }
         }
 
         /**
-         * Returns false (with an error message) when a desktop decision exists and differs
-         * from this mobile build's decision — the caller must fail the build.
+         * Returns false (with an error message) when an existing desktop record cannot prove
+         * that this mobile build derives the same layout — the caller must fail the build.
          */
         internal static bool VerifyMobileDecision(
             string blueprintId,
@@ -90,17 +124,27 @@ namespace FuryPlusPlus {
         ) {
             error = null;
             if (string.IsNullOrEmpty(blueprintId)) return true;
+            var file = FileFor(blueprintId);
+            if (file == null) {
+                error = "FuryPlusPlus cannot verify cross-platform sync data because the avatar " +
+                        "has an invalid blueprint ID. Reattach or upload the avatar blueprint first.";
+                return false;
+            }
 
             SavedData saved;
             try {
-                var file = FileFor(blueprintId);
                 if (!File.Exists(file)) return true;
                 saved = JsonUtility.FromJson<SavedData>(File.ReadAllText(file));
             } catch (Exception e) {
-                Log.Warn("Could not read cross-platform sync data (skipping verification): " + e.Message);
-                return true;
+                error = "FuryPlusPlus cross-platform sync data could not be read safely: " + e.Message +
+                        ". Re-upload the desktop version before building for mobile.";
+                return false;
             }
-            if (saved == null) return true;
+            if (saved == null) {
+                error = "FuryPlusPlus cross-platform sync data is invalid. Re-upload the desktop " +
+                        "version before building for mobile.";
+                return false;
+            }
 
             if (saved.algorithmVersion != AlgorithmVersion) {
                 error = $"FuryPlusPlus sync data for this avatar was written by a different " +
@@ -117,7 +161,11 @@ namespace FuryPlusPlus {
 
             // Compressor inputs only matter when the compressor actually engages, which
             // (on mobile) means VRCFury's own desktop sync file marked params compressed.
-            if (VrcfuryDesktopDataCompresses(blueprintId)) {
+            if (!TryReadVrcfuryDesktopCompression(
+                    blueprintId, out var hasVrcfuryData, out var vrcfuryCompresses, out error)) {
+                return false;
+            }
+            if (hasVrcfuryData && vrcfuryCompresses) {
                 var current = CurrentCompressorInputs();
                 if (saved.compressorLanePacking != current.LanePacking
                     || (saved.compressorSub8List ?? "") != current.Sub8List
@@ -136,15 +184,39 @@ namespace FuryPlusPlus {
             return true;
         }
 
-        /** True when VRCFury's own desktop sync file for this avatar compressed any param. */
-        private static bool VrcfuryDesktopDataCompresses(string blueprintId) {
+        private static bool TryReadVrcfuryDesktopCompression(
+            string blueprintId,
+            out bool exists,
+            out bool compressed,
+            out string error
+        ) {
+            exists = false;
+            compressed = false;
+            error = null;
             try {
-                var path = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "VRCFury", "DesktopSyncData", blueprintId + ".json");
-                if (!File.Exists(path)) return false;
-                // Read-only peek at VRCFury's file (never written by FuryPlusPlus).
-                return File.ReadAllText(path).Contains("\"compressed\": true");
+                var path = Path.Combine(VrcfuryDesktopDirPath, blueprintId + ".json");
+                if (!File.Exists(path)) return true;
+                exists = true;
+                if (TryParseVrcfuryCompression(File.ReadAllText(path), out compressed)) return true;
+                error = "VRCFury desktop sync data is invalid, so FuryPlusPlus cannot safely " +
+                        "verify the compressor layout. Re-upload the desktop version before " +
+                        "building for mobile.";
+                return false;
+            } catch (Exception e) {
+                error = "VRCFury desktop sync data could not be read safely: " + e.Message +
+                        ". Re-upload the desktop version before building for mobile.";
+                return false;
+            }
+        }
+
+        internal static bool TryParseVrcfuryCompression(string json, out bool compressed) {
+            compressed = false;
+            if (string.IsNullOrWhiteSpace(json)) return false;
+            try {
+                var data = JsonUtility.FromJson<VrcfurySavedData>(json);
+                if (data?.parameters == null) return false;
+                compressed = data.parameters.Any(parameter => parameter.compressed);
+                return true;
             } catch {
                 return false;
             }

@@ -34,33 +34,14 @@ namespace FuryPlusPlus {
 
         [ThreadStatic] private static Context active;
 
-        private static Type physboneType;
-        private static FieldInfo ignoreTransformsField;
-        private static MethodInfo getRootTransform;
-
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
-            physboneType = ReflectionUtils.FindType(
-                "VRC.SDK3.Dynamics.PhysBone.Components.VRCPhysBone"
-            );
-            var physboneBaseType = ReflectionUtils.FindType("VRC.Dynamics.VRCPhysBoneBase");
-
-            ignoreTransformsField = physboneBaseType?.GetField(
-                "ignoreTransforms",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
-            );
-            getRootTransform = physboneBaseType?.GetMethod(
-                "GetRootTransform",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
-                null,
-                Type.EmptyTypes,
-                null
-            );
-
-            if (!ArmatureCompat.ArmatureLinkAvailable || !ArmatureCompat.HapticSocketsAvailable
-                || ArmatureCompat.RemoveFromPhysbones == null || physboneType == null
-                || ignoreTransformsField == null || getRootTransform == null) {
-                throw new InvalidOperationException("target signature mismatch");
-            }
+            ArmatureCompat.DemandArmatureLink();
+            ArmatureCompat.DemandHapticSockets();
+            ReflectionUtils.Demand(ArmatureCompat.RemoveFromPhysbones, "PhysboneUtils.RemoveFromPhysbones(...)");
+            ReflectionUtils.Demand(ArmatureCompat.PhysboneType, "VRCPhysBone");
+            ReflectionUtils.Demand(ArmatureCompat.PhysboneIgnoreTransforms, "VRCPhysBoneBase.ignoreTransforms");
+            ReflectionUtils.Demand(ArmatureCompat.PhysboneGetRootTransform,
+                "VRCPhysBoneBase.GetRootTransform()");
 
             harmony.Patch(
                 ArmatureCompat.ArmatureLinkApply,
@@ -94,9 +75,9 @@ namespace FuryPlusPlus {
                 var avatar = ArmatureCompat.GetAvatar(instance, avatarField);
                 if (avatar == null) return;
                 var context = new Context();
-                foreach (var component in avatar.GetComponentsInChildren(physboneType, true)) {
+                foreach (var component in avatar.GetComponentsInChildren(ArmatureCompat.PhysboneType, true)) {
                     if (component == null) continue;
-                    var root = getRootTransform.Invoke(component, null) as Transform;
+                    var root = ArmatureCompat.PhysboneGetRootTransform.Invoke(component, null) as Transform;
                     if (root == null) continue;
                     context.ByRoot.GetOrAddList(root.GetInstanceID()).Add(component);
                 }
@@ -126,7 +107,7 @@ namespace FuryPlusPlus {
                 if (!context.ByRoot.TryGetValue(ancestor.GetInstanceID(), out var physbones)) continue;
                 foreach (var component in physbones) {
                     if (component == null) continue;
-                    var ignoreTransforms = ignoreTransformsField.GetValue(component) as IList;
+                    var ignoreTransforms = ArmatureCompat.PhysboneIgnoreTransforms.GetValue(component) as IList;
                     if (ignoreTransforms == null) return true;
 
                     var alreadyExcluded = false;

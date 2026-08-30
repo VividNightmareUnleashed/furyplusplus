@@ -2,7 +2,6 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using System.Text;
 using HarmonyLib;
 using UnityEditor;
@@ -55,128 +54,16 @@ namespace FuryPlusPlus {
     }
 
     internal static class BlendshapeBakeRewritePatch {
-        private static Type mmdCompatibilityType;
-        private static FieldInfo globalsField;
-        private static FieldInfo allFeaturesField;
-        private static FieldInfo avatarObjectField;
-        private static FieldInfo avatarField;
-        private static FieldInfo controllersField;
-        private static FieldInfo animatorsField;
-        private static MethodInfo getBlendshapeCurves;
-        private static MethodInfo getAllUsedControllers;
-        private static MethodInfo getSubControllers;
-        private static MethodInfo vfGetComponentsInSelfAndChildren;
-        private static MethodInfo skinGetMesh;
-        private static MethodInfo skinGetMutableMesh;
-        private static MethodInfo skinOwner;
-        private static MethodInfo ownerGetPath;
-        private static MethodInfo isMaybeMmdBlendshape;
-        private static MethodInfo meshDirty;
-        // Tuple element fields of GetBindings/GetSubControllers entries, cached from the
-        // first entry seen (the runtime types are stable per domain load) so per-entry
-        // loops never touch the member tables.
-        private static FieldInfo bindingsItem1;
-        private static FieldInfo bindingsItem2;
-        private static FieldInfo pairItem1;
-        private static FieldInfo pairItem2;
-
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
-            const BindingFlags any = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-            var builderType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Feature.BlendshapeOptimizerBuilder"),
-                "VF.Feature.BlendshapeOptimizerBuilder");
-            mmdCompatibilityType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Model.Feature.MmdCompatibility"), "VF.Model.Feature.MmdCompatibility");
-            var globalsType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Service.GlobalsService"), "VF.Service.GlobalsService");
-            var controllersServiceType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Service.ControllersService"), "VF.Service.ControllersService");
-            var animatorsServiceType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Service.AnimatorHolderService"), "VF.Service.AnimatorHolderService");
-            var vfGameObjectType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Utils.VFGameObject"), "VF.Utils.VFGameObject");
-            var mmdUtilsType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Builder.MmdUtils"), "VF.Builder.MmdUtils");
-
-            globalsField = ReflectionUtils.Demand(builderType.GetField("globals", any), "builder.globals");
-            allFeaturesField = ReflectionUtils.Demand(
-                globalsType.GetField("allFeaturesInRun", any), "GlobalsService.allFeaturesInRun");
-            avatarObjectField = ReflectionUtils.Demand(
-                builderType.GetField("avatarObject", any), "builder.avatarObject");
-            avatarField = ReflectionUtils.Demand(builderType.GetField("avatar", any), "builder.avatar");
-            controllersField = ReflectionUtils.Demand(
-                builderType.GetField("controllers", any), "builder.controllers");
-            animatorsField = ReflectionUtils.Demand(builderType.GetField("animators", any), "builder.animators");
-            // 1.1382 folded the owner argument away — a VFBinding carries its own resolved
-            // object, so blendshape curves are collected per controller alone.
-            getBlendshapeCurves = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(builderType, "GetBlendshapeCurves",
-                    method => method.GetParameters().Length == 1),
-                "builder.GetBlendshapeCurves(controller)");
+            BlendshapeOptimizerCompat.DemandCore();
             ClipCurveCompat.EnsureResolved();
             ReflectionUtils.Demand(ClipCurveCompat.BindingTarget, "VFBinding.target");
             ReflectionUtils.Demand(ClipCurveCompat.BindingPropertyName, "VFBinding.propertyName");
-            getAllUsedControllers = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(controllersServiceType, "GetAllUsedControllers",
-                    method => method.GetParameters().Length == 0),
-                "ControllersService.GetAllUsedControllers()");
-            getSubControllers = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(animatorsServiceType, "GetSubControllers",
-                    method => method.GetParameters().Length == 0),
-                "AnimatorHolderService.GetSubControllers()");
-            vfGetComponentsInSelfAndChildren = ReflectionUtils.Demand(
-                vfGameObjectType.GetMethods(any)
-                    .SingleOrDefault(method => method.Name == "GetComponentsInSelfAndChildren"
-                                               && method.IsGenericMethodDefinition
-                                               && method.GetParameters().Length == 0),
-                "VFGameObject.GetComponentsInSelfAndChildren<T>()")
-                .MakeGenericMethod(typeof(SkinnedMeshRenderer));
             VfGameObjectCompat.DemandCore();
-
-            // Extension methods used by the stock body.
-            skinGetMesh = ReflectionUtils.Demand(
-                FindExtension("VF.Utils.RendererExtensions", "GetMesh", 1)
-                ?? FindExtension("VF.Utils.SkinnedMeshRendererExtensions", "GetMesh", 1),
-                "skin.GetMesh()");
-            skinGetMutableMesh = ReflectionUtils.Demand(
-                FindExtension("VF.Utils.RendererExtensions", "GetMutableMesh", 2)
-                ?? FindExtension("VF.Utils.SkinnedMeshRendererExtensions", "GetMutableMesh", 2),
-                "skin.GetMutableMesh(reason)");
-            skinOwner = ReflectionUtils.Demand(
-                FindExtension("VF.Utils.VFGameObjectExtensions", "owner", 1),
-                "component.owner()");
-            ownerGetPath = ReflectionUtils.Demand(
-                vfGameObjectType.GetMethods(any)
-                    .SingleOrDefault(method => {
-                        var parameters = method.GetParameters();
-                        return method.Name == "GetPath"
-                               && parameters.Length == 3
-                               && parameters[0].ParameterType == vfGameObjectType
-                               && parameters[1].ParameterType == typeof(bool)
-                               && parameters[2].ParameterType == typeof(bool);
-                    }),
-                "VFGameObject.GetPath(root, prettyRoot, removeCloneFromRoot)");
-            isMaybeMmdBlendshape = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(mmdUtilsType, "IsMaybeMmdBlendshape",
-                    method => method.GetParameters().Length == 1),
-                "MmdUtils.IsMaybeMmdBlendshape(name)");
-            meshDirty = FindExtension("VF.Utils.UnityCompatUtils", "Dirty", 1)
-                        ?? FindExtension("VF.Utils.ObjectExtensions", "Dirty", 1);
-
-            var apply = ReflectionUtils.Demand(
-                ReflectionUtils.FindNoArgVoid(builderType, "Apply"), "BlendshapeOptimizerBuilder.Apply()");
             harmony.Patch(
-                apply,
+                BlendshapeOptimizerCompat.Apply,
                 prefix: new HarmonyMethod(typeof(BlendshapeBakeRewritePatch), nameof(ApplyPrefix))
             );
-        }
-
-        private static MethodInfo FindExtension(string typeName, string methodName, int paramCount) {
-            var type = ReflectionUtils.FindType(typeName);
-            if (type == null) return null;
-            return type.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .FirstOrDefault(method => method.Name == methodName
-                                          && method.GetParameters().Length == paramCount);
         }
 
         private static bool ApplyPrefix(object __instance) {
@@ -191,11 +78,12 @@ namespace FuryPlusPlus {
         }
 
         private static void Run(object builder) {
-            var globals = globalsField.GetValue(builder);
-            var keepMmdShapes = ((IEnumerable)allFeaturesField.GetValue(globals)).Cast<object>()
-                .Any(feature => mmdCompatibilityType.IsInstanceOfType(feature));
-            var avatarObject = avatarObjectField.GetValue(builder);
-            var avatar = (VRCAvatarDescriptor)avatarField.GetValue(builder);
+            var globals = BlendshapeOptimizerCompat.Globals.GetValue(builder);
+            var keepMmdShapes = ((IEnumerable)BlendshapeOptimizerCompat.AllFeatures.GetValue(globals))
+                .Cast<object>()
+                .Any(feature => BlendshapeOptimizerCompat.MmdCompatibilityType.IsInstanceOfType(feature));
+            var avatarObject = BlendshapeOptimizerCompat.AvatarObject.GetValue(builder);
+            var avatar = (VRCAvatarDescriptor)BlendshapeOptimizerCompat.Avatar.GetValue(builder);
             var avatarRoot = VfGameObjectCompat.Unwrap(avatarObject);
             if (avatarRoot == null) throw new Exception("no avatar root");
 
@@ -204,188 +92,202 @@ namespace FuryPlusPlus {
                 BlendshapeBakeRewriteModule.Instance,
                 BlendshapeBakeRewriteModule.FixMultiFrameInterpolation);
 
-            // Skin-invariant blendshape-curve collection, one pass. VRCFury hoists this out
-            // of the per-mesh loop itself now (it hands CollectAnimatedBlendshapesForMesh a
-            // Lazy), but it still rescans the whole list per skin — so bucket by the
-            // binding's resolved target object, giving an O(1) lookup per skin instead.
-            var controllersService = controllersField.GetValue(builder);
-            var animatorsService = animatorsField.GetValue(builder);
-            var blendshapeBindingsByTarget =
+            var blendshapeBindingsByTarget = BuildBlendshapeBindingIndex(builder);
+
+            var logOutput = new StringBuilder();
+            var skins = (IEnumerable)BlendshapeOptimizerCompat.GetSkins.Invoke(avatarObject, null);
+            foreach (SkinnedMeshRenderer skin in skins) {
+                OptimizeSkin(builder, skin, avatar, keepMmdShapes, fixInterpolation,
+                    blendshapeBindingsByTarget, logOutput);
+            }
+            Debug.Log($"Blendshape Optimizer Actions:\n{logOutput}");
+        }
+
+        private static void OptimizeSkin(
+            object builder,
+            SkinnedMeshRenderer skin,
+            VRCAvatarDescriptor avatar,
+            bool keepMmdShapes,
+            bool fixInterpolation,
+            Dictionary<object, List<(string Blendshape, AnimationCurve Curve)>>
+                blendshapeBindingsByTarget,
+            StringBuilder logOutput
+        ) {
+            var mesh = BlendshapeOptimizerCompat.SkinGetMesh.Invoke(
+                null, new object[] { skin }) as Mesh;
+            if (mesh == null) return;
+            var blendshapeCount = mesh.blendShapeCount;
+            if (blendshapeCount == 0) return;
+            var skinOwnerObj = BlendshapeOptimizerCompat.SkinOwner.Invoke(
+                null, new object[] { skin });
+            var path = (string)ReflectionUtils.InvokeUnwrapped(
+                BlendshapeOptimizerCompat.OwnerGetPath, skinOwnerObj,
+                new[] { BlendshapeOptimizerCompat.AvatarObject.GetValue(builder),
+                    (object)false, (object)false });
+
+            logOutput.Append($"\n┬─ Optimizing {path}\n");
+
+            var animatedBlendshapes = CollectAnimatedBlendshapesForMesh(
+                skin, skinOwnerObj, blendshapeBindingsByTarget, avatar);
+
+            bool ShouldKeepName(string name) {
+                if (animatedBlendshapes.Contains(name)) return true;
+                if (keepMmdShapes
+                    && (bool)BlendshapeOptimizerCompat.IsMaybeMmdBlendshape.Invoke(
+                        null, new object[] { name })
+                    && path == "Body") {
+                    return true;
+                }
+                return false;
+            }
+
+            var blendshapeIdsToKeep = Enumerable.Range(0, blendshapeCount)
+                .Where(id => ShouldKeepName(mesh.GetBlendShapeName(id)))
+                .ToImmutableHashSetCompat();
+
+            if (blendshapeIdsToKeep.Count == blendshapeCount) return;
+
+            var savedWeights = Enumerable.Range(0, blendshapeCount)
+                .Select(skin.GetBlendShapeWeight).ToArray();
+
+            // The original mesh keeps all shape data after the mutable clone.
+            var originalMesh = mesh;
+            mesh = BlendshapeOptimizerCompat.SkinGetMutableMesh.Invoke(null,
+                new object[] { skin, "Needed to remove blendshapes for blendshape optimizer" }) as Mesh;
+            if (mesh == null) throw new Exception("GetMutableMesh returned null");
+
+            // GetMutableMesh can return the same object when an earlier pass already made
+            // the mesh mutable. Capture kept frames before clearing in that case.
+            var sameObject = ReferenceEquals(originalMesh, mesh);
+            var vertexCount = mesh.vertexCount;
+            var bufferV = new Vector3[vertexCount];
+            var bufferN = new Vector3[vertexCount];
+            var bufferT = new Vector3[vertexCount];
+            var verts = mesh.vertices;
+            var normals = mesh.normals;
+            var tangents = mesh.tangents;
+            var bakedAny = false;
+
+            var names = new string[blendshapeCount];
+            var frameCounts = new int[blendshapeCount];
+            var keptFrames = sameObject
+                ? new Dictionary<int, List<(float Weight, Vector3[] V, Vector3[] N, Vector3[] T)>>()
+                : null;
+            for (var id = 0; id < blendshapeCount; id++) {
+                names[id] = originalMesh.GetBlendShapeName(id);
+                frameCounts[id] = originalMesh.GetBlendShapeFrameCount(id);
+                var keep = blendshapeIdsToKeep.Contains(id);
+                if (!keep) {
+                    BakeShape(originalMesh, id, frameCounts[id], savedWeights[id], fixInterpolation,
+                        verts, normals, tangents, bufferV, bufferN, bufferT, ref bakedAny);
+                } else if (sameObject) {
+                    var frames = new List<(float, Vector3[], Vector3[], Vector3[])>();
+                    for (var frame = 0; frame < frameCounts[id]; frame++) {
+                        var v = new Vector3[vertexCount];
+                        var n = new Vector3[vertexCount];
+                        var t = new Vector3[vertexCount];
+                        originalMesh.GetBlendShapeFrameVertices(id, frame, v, n, t);
+                        frames.Add((originalMesh.GetBlendShapeFrameWeight(id, frame), v, n, t));
+                    }
+                    keptFrames[id] = frames;
+                }
+            }
+
+            mesh.ClearBlendShapes();
+
+            for (var id = 0; id < blendshapeCount; id++) {
+                var keep = blendshapeIdsToKeep.Contains(id);
+                string detail;
+                if (keep) {
+                    detail = $"Keeping BlendShape \"{names[id]}\"\n";
+                    if (sameObject) {
+                        foreach (var (weight, v, n, t) in keptFrames[id]) {
+                            mesh.AddBlendShapeFrame(names[id], weight, v, n, t);
+                        }
+                    } else {
+                        for (var frame = 0; frame < frameCounts[id]; frame++) {
+                            var weight = originalMesh.GetBlendShapeFrameWeight(id, frame);
+                            originalMesh.GetBlendShapeFrameVertices(
+                                id, frame, bufferV, bufferN, bufferT);
+                            mesh.AddBlendShapeFrame(names[id], weight, bufferV, bufferN, bufferT);
+                        }
+                    }
+                } else {
+                    detail = $"Baking BlendShape \"{names[id]}\" into mesh at weight " +
+                             $"{savedWeights[id]}, as weight is not animated\n";
+                }
+                logOutput.Append(id != blendshapeCount - 1 ? "├" : "└").Append(detail);
+            }
+
+            if (bakedAny) {
+                mesh.vertices = verts;
+                mesh.normals = normals;
+                mesh.tangents = tangents;
+            }
+            if (BlendshapeOptimizerCompat.MeshDirty != null) {
+                BlendshapeOptimizerCompat.MeshDirty.Invoke(null, new object[] { mesh });
+            } else {
+                EditorUtility.SetDirty(mesh);
+            }
+
+            RestoreWeightsAndEyelids(
+                skin, avatar, blendshapeCount, blendshapeIdsToKeep, savedWeights);
+        }
+
+        /** Buckets the skin-invariant curve scan by resolved renderer owner. */
+        private static Dictionary<object, List<(string Blendshape, AnimationCurve Curve)>>
+            BuildBlendshapeBindingIndex(object builder) {
+            var bindingsByTarget =
                 new Dictionary<object, List<(string Blendshape, AnimationCurve Curve)>>();
 
             void AddCurves(object controller) {
                 var curves = (IEnumerable)ReflectionUtils.InvokeUnwrapped(
-                    getBlendshapeCurves, builder, new[] { controller });
+                    BlendshapeOptimizerCompat.GetBlendshapeCurves, builder, new[] { controller });
                 foreach (var entry in curves) {
-                    if (bindingsItem1 == null) {
-                        var entryType = entry.GetType();
-                        bindingsItem1 = entryType.GetField("Item1");
-                        bindingsItem2 = entryType.GetField("Item2");
-                    }
-                    var binding = bindingsItem1.GetValue(entry);
-                    var curve = (AnimationCurve)bindingsItem2.GetValue(entry);
-                    // GetBlendshapeCurves already filters to SkinnedMeshRenderer +
-                    // "blendShape." — an unresolved binding targets nothing and can never
-                    // match a skin, so it is dropped here rather than scanned per mesh.
+                    var binding = BlendshapeOptimizerCompat.BindingOf(entry);
+                    var curve = BlendshapeOptimizerCompat.CurveOf(entry);
                     var target = ClipCurveCompat.TargetOf(binding);
                     if (target == null || curve == null) continue;
                     var propertyName = ClipCurveCompat.PropertyNameOf(binding);
                     if (propertyName == null || !propertyName.StartsWith("blendShape.")) continue;
-                    blendshapeBindingsByTarget.GetOrAddList(target)
+                    bindingsByTarget.GetOrAddList(target)
                         .Add((propertyName.Substring(11), curve));
                 }
             }
 
-            foreach (var manager in (IEnumerable)getAllUsedControllers.Invoke(controllersService, null)) {
+            var controllersService = BlendshapeOptimizerCompat.Controllers.GetValue(builder);
+            foreach (var manager in (IEnumerable)BlendshapeOptimizerCompat.GetAllUsedControllers
+                         .Invoke(controllersService, null)) {
                 AddCurves(manager);
             }
-            foreach (var pair in (IEnumerable)getSubControllers.Invoke(animatorsService, null)) {
-                if (pairItem2 == null) {
-                    var pairType = pair.GetType();
-                    pairItem1 = pairType.GetField("Item1");
-                    pairItem2 = pairType.GetField("Item2");
-                }
-                // (owner, controller) — the owner is no longer needed to resolve bindings.
-                AddCurves(pairItem2.GetValue(pair));
+            var animatorsService = BlendshapeOptimizerCompat.Animators.GetValue(builder);
+            foreach (var pair in (IEnumerable)BlendshapeOptimizerCompat.GetSubControllers
+                         .Invoke(animatorsService, null)) {
+                AddCurves(BlendshapeOptimizerCompat.ControllerOf(pair));
             }
+            return bindingsByTarget;
+        }
 
-            var logOutput = new StringBuilder();
-            var skins = (IEnumerable)vfGetComponentsInSelfAndChildren.Invoke(avatarObject, null);
-            foreach (SkinnedMeshRenderer skin in skins) {
-                var mesh = skinGetMesh.Invoke(null, new object[] { skin }) as Mesh;
-                if (mesh == null) continue;
-                var blendshapeCount = mesh.blendShapeCount;
-                if (blendshapeCount == 0) continue;
-                var skinOwnerObj = skinOwner.Invoke(null, new object[] { skin });
-                var path = (string)ReflectionUtils.InvokeUnwrapped(
-                    ownerGetPath, skinOwnerObj,
-                    new[] { avatarObjectField.GetValue(builder), (object)false, (object)false });
-
-                logOutput.Append($"\n┬─ Optimizing {path}\n");
-
-                var animatedBlendshapes = CollectAnimatedBlendshapesForMesh(
-                    skin, skinOwnerObj, blendshapeBindingsByTarget, avatar);
-
-                bool ShouldKeepName(string name) {
-                    if (animatedBlendshapes.Contains(name)) return true;
-                    if (keepMmdShapes
-                        && (bool)isMaybeMmdBlendshape.Invoke(null, new object[] { name })
-                        && path == "Body") {
-                        return true;
-                    }
-                    return false;
-                }
-
-                var blendshapeIdsToKeep = Enumerable.Range(0, blendshapeCount)
-                    .Where(id => ShouldKeepName(mesh.GetBlendShapeName(id)))
-                    .ToImmutableHashSetCompat();
-
-                if (blendshapeIdsToKeep.Count == blendshapeCount) {
-                    continue;
-                }
-
-                var savedWeights = Enumerable.Range(0, blendshapeCount)
-                    .Select(skin.GetBlendShapeWeight).ToArray();
-
-                // (b)+(c): the original mesh keeps all shape data after the mutable clone.
-                var originalMesh = mesh;
-                mesh = skinGetMutableMesh.Invoke(null,
-                    new object[] { skin, "Needed to remove blendshapes for blendshape optimizer" }) as Mesh;
-                if (mesh == null) throw new Exception("GetMutableMesh returned null");
-
-                // GetMutableMesh returns the SAME object when the mesh was already made
-                // mutable earlier in the build (bounding-box fix, SPS, …) — in that case
-                // clearing would destroy our data source, so kept shapes are extracted
-                // up front (only for this case, and only the KEPT shapes).
-                var sameObject = ReferenceEquals(originalMesh, mesh);
-                var vertexCount = mesh.vertexCount;
-                var bufferV = new Vector3[vertexCount];
-                var bufferN = new Vector3[vertexCount];
-                var bufferT = new Vector3[vertexCount];
-                var verts = mesh.vertices;
-                var normals = mesh.normals;
-                var tangents = mesh.tangents;
-                var bakedAny = false;
-
-                // Phase A (pre-clear): capture metadata, bake non-kept shapes into the
-                // accumulators, and extract kept frames when the source will be cleared.
-                var names = new string[blendshapeCount];
-                var frameCounts = new int[blendshapeCount];
-                var keptFrames = sameObject
-                    ? new Dictionary<int, List<(float Weight, Vector3[] V, Vector3[] N, Vector3[] T)>>()
-                    : null;
-                for (var id = 0; id < blendshapeCount; id++) {
-                    names[id] = originalMesh.GetBlendShapeName(id);
-                    frameCounts[id] = originalMesh.GetBlendShapeFrameCount(id);
-                    var keep = blendshapeIdsToKeep.Contains(id);
-                    if (!keep) {
-                        BakeShape(originalMesh, id, frameCounts[id], savedWeights[id], fixInterpolation,
-                            verts, normals, tangents, bufferV, bufferN, bufferT, ref bakedAny);
-                    } else if (sameObject) {
-                        var frames = new List<(float, Vector3[], Vector3[], Vector3[])>();
-                        for (var frame = 0; frame < frameCounts[id]; frame++) {
-                            var v = new Vector3[vertexCount];
-                            var n = new Vector3[vertexCount];
-                            var t = new Vector3[vertexCount];
-                            originalMesh.GetBlendShapeFrameVertices(id, frame, v, n, t);
-                            frames.Add((originalMesh.GetBlendShapeFrameWeight(id, frame), v, n, t));
-                        }
-                        keptFrames[id] = frames;
+        private static void RestoreWeightsAndEyelids(
+            SkinnedMeshRenderer skin,
+            VRCAvatarDescriptor avatar,
+            int originalCount,
+            ISet<int> keptIds,
+            IReadOnlyList<float> savedWeights
+        ) {
+            var newId = 0;
+            for (var id = 0; id < originalCount; id++) {
+                if (!keptIds.Contains(id)) continue;
+                skin.SetBlendShapeWeight(newId, savedWeights[id]);
+                if (avatar.customEyeLookSettings.eyelidsSkinnedMesh == skin) {
+                    for (var i = 0; i < avatar.customEyeLookSettings.eyelidsBlendshapes.Length; i++) {
+                        if (avatar.customEyeLookSettings.eyelidsBlendshapes[i] != id) continue;
+                        avatar.customEyeLookSettings.eyelidsBlendshapes[i] = newId;
+                        EditorUtility.SetDirty(avatar);
                     }
                 }
-
-                mesh.ClearBlendShapes();
-
-                // Phase B (post-clear): re-add kept shapes in original id order.
-                for (var id = 0; id < blendshapeCount; id++) {
-                    var keep = blendshapeIdsToKeep.Contains(id);
-                    string logOutputDetail;
-                    if (keep) {
-                        logOutputDetail = $"Keeping BlendShape \"{names[id]}\"\n";
-                        if (sameObject) {
-                            foreach (var (weight, v, n, t) in keptFrames[id]) {
-                                mesh.AddBlendShapeFrame(names[id], weight, v, n, t);
-                            }
-                        } else {
-                            for (var frame = 0; frame < frameCounts[id]; frame++) {
-                                var weight = originalMesh.GetBlendShapeFrameWeight(id, frame);
-                                originalMesh.GetBlendShapeFrameVertices(id, frame, bufferV, bufferN, bufferT);
-                                mesh.AddBlendShapeFrame(names[id], weight, bufferV, bufferN, bufferT);
-                            }
-                        }
-                    } else {
-                        logOutputDetail =
-                            $"Baking BlendShape \"{names[id]}\" into mesh at weight {savedWeights[id]}, as weight is not animated\n";
-                    }
-                    logOutput.Append(id != blendshapeCount - 1 ? "├" : "└").Append(logOutputDetail);
-                }
-
-                if (bakedAny) {
-                    mesh.vertices = verts;
-                    mesh.normals = normals;
-                    mesh.tangents = tangents;
-                }
-                if (meshDirty != null) meshDirty.Invoke(null, new object[] { mesh });
-                else EditorUtility.SetDirty(mesh);
-
-                var newId = 0;
-                for (var id = 0; id < blendshapeCount; id++) {
-                    var keep = blendshapeIdsToKeep.Contains(id);
-                    if (keep) {
-                        skin.SetBlendShapeWeight(newId, savedWeights[id]);
-                        if (avatar.customEyeLookSettings.eyelidsSkinnedMesh == skin) {
-                            for (var i = 0; i < avatar.customEyeLookSettings.eyelidsBlendshapes.Length; i++) {
-                                if (avatar.customEyeLookSettings.eyelidsBlendshapes[i] == id) {
-                                    avatar.customEyeLookSettings.eyelidsBlendshapes[i] = newId;
-                                    EditorUtility.SetDirty(avatar);
-                                }
-                            }
-                        }
-                        newId++;
-                    }
-                }
+                newId++;
             }
-            Debug.Log($"Blendshape Optimizer Actions:\n{logOutput}");
         }
 
         /**

@@ -41,38 +41,15 @@ namespace FuryPlusPlus {
 
         [ThreadStatic] private static Context active;
 
-        private static Type constraintType;
-        private static MethodInfo createConstraint;
-        private static MethodInfo getAffectedObject;
-        private static MethodInfo getConstraintComponent;
-
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
-            constraintType = ReflectionUtils.FindType("VF.Utils.VFConstraint");
-
-            createConstraint = constraintType?.GetMethod(
-                "CreateOrNull",
-                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
-                null,
-                new[] { typeof(Component) },
-                null
-            );
-            getAffectedObject = ReflectionUtils.FindUniqueMethod(
-                constraintType,
-                "GetAffectedObject",
-                method => method.GetParameters().Length == 0
-            );
-            getConstraintComponent = ReflectionUtils.FindUniqueMethod(
-                constraintType,
-                "GetComponent",
-                method => method.GetParameters().Length == 0
-            );
-
-            if (!ArmatureCompat.ArmatureLinkAvailable || !ArmatureCompat.HapticSocketsAvailable
-                || ArmatureCompat.GetConstraintsMethod == null || constraintType == null
-                || createConstraint == null || getAffectedObject == null
-                || getConstraintComponent == null) {
-                throw new InvalidOperationException("target signature mismatch");
-            }
+            ArmatureCompat.DemandArmatureLink();
+            ArmatureCompat.DemandHapticSockets();
+            ReflectionUtils.Demand(ArmatureCompat.GetConstraintsMethod, "VFGameObject.GetConstraints(...)");
+            ReflectionUtils.Demand(ArmatureCompat.ConstraintType, "VF.Utils.VFConstraint");
+            ReflectionUtils.Demand(ArmatureCompat.ConstraintCreate, "VFConstraint.CreateOrNull(Component)");
+            ReflectionUtils.Demand(ArmatureCompat.ConstraintGetAffectedObject,
+                "VFConstraint.GetAffectedObject()");
+            ReflectionUtils.Demand(ArmatureCompat.ConstraintGetComponent, "VFConstraint.GetComponent()");
 
             harmony.Patch(
                 ArmatureCompat.ArmatureLinkApply,
@@ -111,12 +88,12 @@ namespace FuryPlusPlus {
                     // CreateOrNull only wraps IConstraint/VRCConstraintBase components, so
                     // don't pay a reflection invoke for the avatar's many Transforms.
                     if (component == null || component is Transform) continue;
-                    var wrapper = createConstraint.Invoke(null, new object[] { component });
+                    var wrapper = ArmatureCompat.ConstraintCreate.Invoke(null, new object[] { component });
                     if (wrapper == null) continue;
 
-                    var affectedWrapper = getAffectedObject.Invoke(wrapper, null);
+                    var affectedWrapper = ArmatureCompat.ConstraintGetAffectedObject.Invoke(wrapper, null);
                     var affected = ArmatureCompat.GetGameObject(affectedWrapper)?.transform;
-                    var constraintComponent = getConstraintComponent.Invoke(wrapper, null) as Component;
+                    var constraintComponent = ArmatureCompat.ConstraintGetComponent.Invoke(wrapper, null) as Component;
                     if (affected == null || constraintComponent == null) continue;
 
                     var entry = new Entry {
@@ -175,7 +152,7 @@ namespace FuryPlusPlus {
             entries.RemoveAll(entry => entry.Component == null || entry.Affected == null);
             entries.Sort((left, right) => left.Order.CompareTo(right.Order));
 
-            var output = Array.CreateInstance(constraintType, entries.Count);
+            var output = Array.CreateInstance(ArmatureCompat.ConstraintType, entries.Count);
             for (var i = 0; i < entries.Count; i++) output.SetValue(entries[i].Wrapper, i);
             __result = output;
             return false;

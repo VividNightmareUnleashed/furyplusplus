@@ -205,27 +205,14 @@ namespace FuryPlusPlus {
             { "_IsGrabbed", "_IsPosed", "_Angle", "_Stretch", "_Squish" };
 
         private void CollectDynamics(GameObject avatarRoot) {
-            var physBoneType = ReflectionUtils.FindType("VRC.SDK3.Dynamics.PhysBone.Components.VRCPhysBone");
-            var contactType = ReflectionUtils.FindType("VRC.SDK3.Dynamics.Contact.Components.VRCContactReceiver");
-            // Member lookups hoisted out of the per-component loop (dynamics-heavy avatars
-            // carry hundreds of PhysBones/Contacts).
-            var physBoneParameter = physBoneType?.GetField("parameter");
-            var contactParameterProperty = contactType?.GetProperty("parameter");
-            var contactParameterField = contactType?.GetField("parameter");
-
             foreach (var component in avatarRoot.GetComponentsInChildren<Component>(true)) {
-                if (component == null) continue;
-                var type = component.GetType();
-                if (physBoneType != null && physBoneType.IsAssignableFrom(type)) {
-                    var parameter = physBoneParameter?.GetValue(component) as string;
-                    if (!string.IsNullOrEmpty(parameter)) {
-                        foreach (var suffix in PhysBoneSuffixes) DynamicsParams.Add(parameter + suffix);
-                    }
-                } else if (contactType != null && contactType.IsAssignableFrom(type)) {
-                    var parameter = contactParameterProperty?.GetValue(component) as string
-                                    ?? contactParameterField?.GetValue(component) as string;
-                    if (!string.IsNullOrEmpty(parameter)) DynamicsParams.Add(parameter);
+                if (!AvatarPipelineCompat.TryGetDynamicsParameter(
+                        component, out var parameter, out var isPhysBone)) continue;
+                if (!isPhysBone) {
+                    DynamicsParams.Add(parameter);
+                    continue;
                 }
+                foreach (var suffix in PhysBoneSuffixes) DynamicsParams.Add(parameter + suffix);
             }
         }
     }

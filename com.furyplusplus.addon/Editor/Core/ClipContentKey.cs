@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Linq;
-using System.Reflection;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
@@ -17,12 +15,6 @@ namespace FuryPlusPlus {
      * tightens every consumer at once rather than letting two of them disagree.
      */
     internal static class ClipContentKey {
-        // AnimationUtility.GetAnimationClipSettings always returns the same type; hash both
-        // public fields and public properties so a Unity-side representation change can
-        // never silently empty the settings block.
-        private static FieldInfo[] settingsFields;
-        private static PropertyInfo[] settingsProperties;
-
         /** Clip-level facts (settings, frame rate, wrap mode, bounds, events). */
         internal static void AppendClipFacts(StringBuilder builder, AnimationClip clip) {
             builder.Append("clip|")
@@ -31,24 +23,9 @@ namespace FuryPlusPlus {
                 .Append(clip.wrapMode).Append('|');
             AppendBounds(builder, clip.localBounds);
 
-            var settings = AnimationUtility.GetAnimationClipSettings(clip);
-            if (settingsFields == null) {
-                var type = settings.GetType();
-                settingsFields = type.GetFields(BindingFlags.Instance | BindingFlags.Public)
-                    .OrderBy(field => field.Name, StringComparer.Ordinal)
-                    .ToArray();
-                settingsProperties = type.GetProperties(BindingFlags.Instance | BindingFlags.Public)
-                    .Where(property => property.CanRead && property.GetIndexParameters().Length == 0)
-                    .OrderBy(property => property.Name, StringComparer.Ordinal)
-                    .ToArray();
-            }
-            foreach (var field in settingsFields) {
-                builder.Append("setting|").Append(field.Name).Append('|')
-                    .Append(Value(field.GetValue(settings))).AppendLine();
-            }
-            foreach (var property in settingsProperties) {
-                builder.Append("setting|").Append(property.Name).Append('|')
-                    .Append(Value(property.GetValue(settings, null))).AppendLine();
+            foreach (var (name, value) in AnimationClipCompat.SettingsOf(clip)) {
+                builder.Append("setting|").Append(name).Append('|')
+                    .Append(Value(value)).AppendLine();
             }
 
             foreach (var animationEvent in AnimationUtility.GetAnimationEvents(clip)) {

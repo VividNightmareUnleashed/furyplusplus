@@ -28,11 +28,8 @@ namespace FuryPlusPlus {
 
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
             UploadCompat.EnsureResolved();
-            var get = UploadCompat.HookMethod;
-
-            if (!ArmatureCompat.ArmatureLinkAvailable || get == null) {
-                throw new InvalidOperationException("target signature mismatch");
-            }
+            var get = ReflectionUtils.Demand(UploadCompat.HookMethod, "upload-state getter");
+            ArmatureCompat.DemandArmatureLink();
 
             harmony.Patch(
                 ArmatureCompat.ArmatureLinkApply,

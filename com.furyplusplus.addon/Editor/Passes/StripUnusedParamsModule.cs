@@ -75,8 +75,6 @@ namespace FuryPlusPlus {
         internal static string LastStats;
         internal static int LastBits;
 
-        private static Type vrcfuryTestType;
-
         internal enum KeepReason {
             /** Strippable — no keep reason applies. */
             None,
@@ -88,16 +86,13 @@ namespace FuryPlusPlus {
         }
 
         internal static void Resolve() {
-            vrcfuryTestType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Model.VRCFuryTest"),
-                "VF.Model.VRCFuryTest"
-            );
+            AvatarPipelineCompat.DemandParameterPasses();
             UploadCompat.DemandCore();
         }
 
         /** True when the avatar root carries VRCFury's build marker (i.e. VRCFury processed it). */
         internal static bool VrcfuryRanOn(GameObject avatarObject) {
-            return vrcfuryTestType != null && avatarObject.GetComponent(vrcfuryTestType) != null;
+            return AvatarPipelineCompat.VrcfuryRanOn(avatarObject);
         }
 
         /**
@@ -163,7 +158,7 @@ namespace FuryPlusPlus {
             List<string> stripped,
             List<string> narrowed
         ) {
-            var blueprintId = GetBlueprintId(descriptor);
+            var blueprintId = AvatarPipelineCompat.GetBlueprintId(descriptor);
             var target = EditorUserBuildSettings.activeBuildTarget;
             var isMobile = target == BuildTarget.Android || target == BuildTarget.iOS;
 
@@ -185,13 +180,5 @@ namespace FuryPlusPlus {
             return true;
         }
 
-        private static string GetBlueprintId(VRCAvatarDescriptor descriptor) {
-            // PipelineManager lives in a precompiled SDK assembly; reflect to avoid the reference.
-            foreach (var component in descriptor.GetComponents<Component>()) {
-                if (component == null || component.GetType().Name != "PipelineManager") continue;
-                return component.GetType().GetField("blueprintId")?.GetValue(component) as string;
-            }
-            return null;
-        }
     }
 }

@@ -25,6 +25,7 @@ namespace FuryPlusPlus {
         // Layer / controller plumbing
         internal static MethodInfo GetFx;                      // ControllersService.GetFx()
         internal static MethodInfo GetLayers;                  // VFController.GetLayers()
+        internal static Type LayerType;                        // VF.Utils.Controller.VFLayer
         /**
          * VFController.GetRaw(), deleted in the detached-controller rewrite — there is no
          * live AnimatorController during a build any more. Kept as a slot so the one module
@@ -39,12 +40,16 @@ namespace FuryPlusPlus {
         internal static MethodInfo LayerGetId;                 // VFLayer.GetLayerId()
         internal static PropertyInfo LayerWeight;              // VFLayer.weight
         internal static PropertyInfo LayerName;                // VFLayer.name
+        internal static PropertyInfo LayerMask;                // VFLayer.mask
         internal static PropertyInfo LayerBlendingMode;        // VFLayer.blendingMode
         internal static PropertyInfo LayerStateMachine;        // VFLayer.stateMachine
         internal static PropertyInfo LayerHasSubMachines;      // VFLayer.hasSubMachines
         internal static MethodInfo GetBindingsAnimatedInLayer; // LayerToTreeService.GetBindingsAnimatedInLayer(VFLayer)
         internal static MethodInfo IsLayerTargeted;            // AnimatorLayerControlOffsetService.IsLayerTargeted(VFLayer)
         internal static MethodInfo GetDefaultLayer;            // FixWriteDefaultsService.GetDefaultLayer()
+        internal static MethodInfo GetDefaultClip;             // FixWriteDefaultsService.GetDefaultClip()
+        internal static MethodInfo OptimizeLayer;              // LayerToTreeService.OptimizeLayer(...)
+        internal static MethodInfo Optimize;                   // LayerToTreeService.Optimize(...)
 
         // VFStateMachine
         internal static PropertyInfo SmStates;                 // .states → IReadOnlyList<VFState>
@@ -137,6 +142,7 @@ namespace FuryPlusPlus {
             var vfControllerType = ReflectionUtils.FindType("VF.Utils.Controller.VFController");
             var controllerManagerType = ReflectionUtils.FindType("VF.Utils.ControllerManager");
             var layerType = ReflectionUtils.FindType("VF.Utils.Controller.VFLayer");
+            LayerType = layerType;
             var stateMachineType = ReflectionUtils.FindType("VF.Utils.Controller.VFStateMachine");
             var stateType = ReflectionUtils.FindType("VF.Utils.Controller.VFState");
             var transitionBaseType = ReflectionUtils.FindType("VF.Utils.Controller.VFTransitionBase");
@@ -183,6 +189,7 @@ namespace FuryPlusPlus {
                 method => method.GetParameters().Length == 0);
             LayerWeight = layerType.GetProperty("weight", any);
             LayerName = layerType.GetProperty("name", any);
+            LayerMask = layerType.GetProperty("mask", any);
             LayerBlendingMode = layerType.GetProperty("blendingMode", any);
             LayerStateMachine = layerType.GetProperty("stateMachine", any);
             LayerHasSubMachines = layerType.GetProperty("hasSubMachines", any);
@@ -192,6 +199,12 @@ namespace FuryPlusPlus {
                 layerControlType, "IsLayerTargeted", method => method.GetParameters().Length == 1);
             GetDefaultLayer = fixWdType == null ? null : ReflectionUtils.FindUniqueMethod(
                 fixWdType, "GetDefaultLayer", method => method.GetParameters().Length == 0);
+            GetDefaultClip = fixWdType == null ? null : ReflectionUtils.FindUniqueMethod(
+                fixWdType, "GetDefaultClip", method => method.GetParameters().Length == 0);
+            OptimizeLayer = layerToTreeType == null ? null : ReflectionUtils.FindUniqueMethod(
+                layerToTreeType, "OptimizeLayer", method => method.GetParameters().Length == 4);
+            Optimize = layerToTreeType == null ? null : ReflectionUtils.FindUniqueMethod(
+                layerToTreeType, "Optimize", method => method.GetParameters().Length == 4);
 
             if (stateMachineType != null) {
                 SmStates = stateMachineType.GetProperty("states", inst);
@@ -379,6 +392,26 @@ namespace FuryPlusPlus {
         /** An empty in-memory clip. Replaces VrcfObjectFactory.Create<AnimationClip>(). */
         internal static object NewEmptyClip(string name) {
             return clipCreate.Invoke(null, new object[] { name });
+        }
+
+        internal static object NewClipsIterator() {
+            return Activator.CreateInstance(ClipsIteratorType);
+        }
+
+        internal static object NewTransition() {
+            return Activator.CreateInstance(TransitionType, nonPublic: true);
+        }
+
+        internal static object NewTreeChild() {
+            return Activator.CreateInstance(TreeChildType);
+        }
+
+        internal static MethodInfo CloseBehavioursAdd(Type behaviourType) {
+            return BehavioursAdd.MakeGenericMethod(behaviourType);
+        }
+
+        internal static MethodInfo CloseBehavioursGet(Type behaviourType) {
+            return BehavioursGet.MakeGenericMethod(behaviourType);
         }
 
         internal static object TreeToMotion(object vfBlendTree) {

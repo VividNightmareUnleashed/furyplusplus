@@ -135,33 +135,22 @@ namespace FuryPlusPlus {
             ReflectionUtils.Demand(ToggleTreeCompat.ChildThreshold, "VFTreeChild.threshold");
             ReflectionUtils.Demand(ToggleTreeCompat.ChildDirectBlendParameter, "VFTreeChild.directBlendParameter");
             ReflectionUtils.Demand(ToggleTreeCompat.ControllerGetParam, "VFController.GetParam(string)");
-            driverBehavioursAdd = ToggleTreeCompat.BehavioursAdd
-                .MakeGenericMethod(typeof(VRCAvatarParameterDriver));
-            driverBehavioursGet = ToggleTreeCompat.BehavioursGet
-                .MakeGenericMethod(typeof(VRCAvatarParameterDriver));
+            driverBehavioursAdd = ToggleTreeCompat.CloseBehavioursAdd(
+                typeof(VRCAvatarParameterDriver));
+            driverBehavioursGet = ToggleTreeCompat.CloseBehavioursGet(
+                typeof(VRCAvatarParameterDriver));
 
-            var controllerManagerType = ReflectionUtils.FindType("VF.Utils.ControllerManager");
             controllerManagerOne = ReflectionUtils.Demand(
-                controllerManagerType == null ? null : ReflectionUtils.FindUniqueMethod(
-                    controllerManagerType, "One", method => method.GetParameters().Length == 0),
-                "ControllerManager.One()");
-            var vfaApType = ReflectionUtils.FindType("VF.Utils.BlendtreeMath+VFAap");
+                CompressorCompat.ControllerManagerOne, "ControllerManager.One()");
             vfaApName = ReflectionUtils.Demand(
-                vfaApType == null ? null : ReflectionUtils.FindUniqueMethod(
-                    vfaApType, "Name", method => method.GetParameters().Length == 0),
-                "BlendtreeMath.VFAap.Name()");
+                CompressorCompat.VfaApName, "BlendtreeMath.VFAap.Name()");
 
             // Everything we add must be factory-created: the SaveAssets pass that runs right
             // after the compressor only attaches VrcfObjectFactory-created objects to the
             // controller asset (and stops walking through anything else) — unattached
             // sub-objects lose their cross-references when the asset reserializes.
-            var factoryType = ReflectionUtils.FindType("VF.Utils.VrcfObjectFactory");
             factoryCreate = ReflectionUtils.Demand(
-                factoryType == null ? null : ReflectionUtils.FindUniqueMethod(
-                    factoryType, "Create", method => !method.IsGenericMethodDefinition
-                                                     && method.GetParameters().Length == 2
-                                                     && method.GetParameters()[0].ParameterType == typeof(Type)),
-                "VrcfObjectFactory.Create(Type, Object)");
+                CompressorCompat.FactoryCreate, "VrcfObjectFactory.Create(Type, Object)");
             ReflectionUtils.Demand(CompressorCompat.ClipSetAap, "AnimationClipExtensions.SetAap(clip, name, curve)");
             ReflectionUtils.Demand(CompressorCompat.FloatToCurve, "FloatOrObjectCurve.op_Implicit(float)");
         }
@@ -478,8 +467,7 @@ namespace FuryPlusPlus {
                 receiveTransitions.Clear();
                 foreach (var transition in moved) decodeTransitions.Add(transition);
 
-                var advance = Activator.CreateInstance(
-                    ToggleTreeCompat.TransitionType, nonPublic: true);
+                var advance = ToggleTreeCompat.NewTransition();
                 ToggleTreeCompat.TrHasFixedDuration.SetValue(advance, true);
                 ToggleTreeCompat.TrDestinationState.SetValue(advance, decodeState);
                 ToggleTreeCompat.TrHasExitTime.SetValue(advance, false);
@@ -541,7 +529,7 @@ namespace FuryPlusPlus {
         }
 
         private static object Child(object motion, float threshold, string directParam) {
-            var child = Activator.CreateInstance(ToggleTreeCompat.TreeChildType);
+            var child = ToggleTreeCompat.NewTreeChild();
             ToggleTreeCompat.ChildMotion.SetValue(child, motion);
             ToggleTreeCompat.ChildThreshold.SetValue(child, threshold);
             if (directParam != null) {

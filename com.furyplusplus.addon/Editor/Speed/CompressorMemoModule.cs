@@ -63,57 +63,27 @@ namespace FuryPlusPlus {
         };
 
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
-            const BindingFlags any = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-
-            var compressorServiceType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Service.Compressor.ParameterCompressorService"),
-                "VF.Service.Compressor.ParameterCompressorService");
-            var solverType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Service.Compressor.ParameterCompressorSolverService"),
-                "VF.Service.Compressor.ParameterCompressorSolverService");
-            var controllersServiceType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Service.ControllersService"), "VF.Service.ControllersService");
-            var menuServiceType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Service.MenuService"), "VF.Service.MenuService");
-            var paramsServiceType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Service.ParamsService"), "VF.Service.ParamsService");
-            var paramManagerType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Utils.ParamManager"), "VF.Utils.ParamManager");
-            var vfControllerType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Utils.Controller.VFController"), "VF.Utils.Controller.VFController");
-
+            CompressorCompat.EnsureResolved();
             var apply = ReflectionUtils.Demand(
-                ReflectionUtils.FindNoArgVoid(compressorServiceType, "Apply"),
-                "ParameterCompressorService.Apply()");
+                CompressorCompat.CompressorApply, "ParameterCompressorService.Apply()");
             var getParamsUsedInMenu = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(solverType, "GetParamsUsedInMenu",
-                    method => method.GetParameters().Length == 1),
+                CompressorCompat.SolverGetParamsUsedInMenu,
                 "ParameterCompressorSolverService.GetParamsUsedInMenu(...)");
             var isParamUsed = ReflectionUtils.Demand(
-                ReflectionUtils.FindMethodWithSignature(controllersServiceType, "IsParamUsed",
-                    typeof(bool), typeof(string)),
-                "ControllersService.IsParamUsed(string)");
+                CompressorCompat.ControllersIsParamUsed, "ControllersService.IsParamUsed(string)");
             var newParam = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(vfControllerType, "_NewParam",
-                    method => method.GetParameters().Length == 3),
-                "VFController._NewParam(...)");
+                CompressorCompat.ControllerNewParam, "VFController._NewParam(...)");
             var addSyncedParam = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(paramManagerType, "AddSyncedParam",
-                    method => method.GetParameters().Length == 1),
-                "ParamManager.AddSyncedParam(...)");
+                CompressorCompat.ParamManagerAddSynced, "ParamManager.AddSyncedParam(...)");
 
             solverMenuServiceField = ReflectionUtils.Demand(
-                solverType.GetField("menuService", any), "ParameterCompressorSolverService.menuService");
+                CompressorCompat.SolverMenuService, "ParameterCompressorSolverService.menuService");
             getReadOnlyMenu = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(menuServiceType, "GetReadOnlyMenu",
-                    method => method.GetParameters().Length == 0),
-                "MenuService.GetReadOnlyMenu()");
+                CompressorCompat.MenuGetReadOnly, "MenuService.GetReadOnlyMenu()");
             controllersParamsServiceField = ReflectionUtils.Demand(
-                controllersServiceType.GetField("paramsService", any), "ControllersService.paramsService");
+                CompressorCompat.ControllersParamsService, "ControllersService.paramsService");
             getReadOnlyParams = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(paramsServiceType, "GetReadOnlyParams",
-                    method => method.GetParameters().Length == 0),
-                "ParamsService.GetReadOnlyParams()");
+                CompressorCompat.ParamsGetReadOnly, "ParamsService.GetReadOnlyParams()");
             // VRCFury 1.1372.0 deleted GetAllReadOnlyControllers and VFController.ctrl along with
             // it: controllers are an in-memory model now, not a wrapper around a live asset.
             // GetAllUsedControllers is what VRCFury moved its own IsParamUsed onto, and the
@@ -121,11 +91,10 @@ namespace FuryPlusPlus {
             // never has to be reached for. This also covers generated controllers, which the old
             // asset-loading read-only list could not see.
             getAllControllers = ReflectionUtils.Demand(
-                ReflectionUtils.FindUniqueMethod(controllersServiceType, "GetAllUsedControllers",
-                    method => method.GetParameters().Length == 0),
+                CompressorCompat.ControllersGetAll,
                 "ControllersService.GetAllUsedControllers()");
             vfControllerParameters = ReflectionUtils.Demand(
-                vfControllerType.GetProperty("parameters", any), "VFController.parameters");
+                CompressorCompat.ControllerParameters, "VFController.parameters");
 
             harmony.Patch(
                 apply,

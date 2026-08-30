@@ -57,8 +57,6 @@ namespace FuryPlusPlus {
 
         private static readonly List<Participant> Participants = new List<Participant>();
         private static bool installed;
-        private static Type vrcfuryTestType;
-
         private static int chainDepth;
         private static readonly HashSet<int> ChainSeen = new HashSet<int>();
         // Non-null only inside an outermost eligible call; one object instead of parallel
@@ -69,8 +67,7 @@ namespace FuryPlusPlus {
         internal static void EnsureInstalled(Harmony harmony) {
             if (installed) return;
 
-            vrcfuryTestType = ReflectionUtils.Demand(
-                ReflectionUtils.FindType("VF.Model.VRCFuryTest"), "VF.Model.VRCFuryTest");
+            AvatarPipelineCompat.DemandVrcfuryTestMarker();
             UploadCompat.DemandCore();
             NdmfCompat.EnsureResolved(); // fail-soft: absence is fine, resolution is not risky
             PreprocessChainCompat.EnsureResolved();
@@ -144,7 +141,7 @@ namespace FuryPlusPlus {
                 var avatarObject = __0;
                 if (avatarObject == null) return true;
                 // Post-processed rerun (VRCFury tags processed play-mode avatars).
-                if (avatarObject.GetComponent(vrcfuryTestType) != null) return true;
+                if (AvatarPipelineCompat.VrcfuryRanOn(avatarObject)) return true;
                 // A replayed avatar carries NDMF's completed tag; unlike the static sets
                 // below it survives everything short of a domain reload, and a normally
                 // baked avatar with the tag is deduped by VRCFury exactly as stock.
