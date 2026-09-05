@@ -9,12 +9,25 @@ releases can be approved after testing without rebuilding FuryPlusPlus solely to
   module still checks its required methods and fields when it installs.
 - **Optional automatic checks:** a one-time prompt asks permission and explains what is
   sent to GitHub. Settings remember the choice and offer a separate one-time check.
+- **Fury++ updater:** separate consent enables release checks at Editor startup and daily.
+  Each installation asks for confirmation, verifies the release checksum and VRCFury
+  approval, and keeps a backup. Updates with changed requirements use Creator Companion.
+- **Armature pruning:** commits batched skin updates before VRCFury scans bone usage,
+  so obsolete outfit bones are removed as they are in stock VRCFury.
+- **Optimization guards:** build-phase callbacks honor both switches. Blendtree merging
+  preserves intervening layer priority; toggle conversions retain masks and altered
+  playback by leaving those layers alone. No-op stripping preserves additive writers.
+- **Older edge cases:** dynamics outputs cannot be narrowed to booleans. Clip keys
+  distinguish escaped strings and additive poses; SPS caches include the VRCFury
+  implementation. The blendshape fix corrects below-first-frame scaling as well.
+- **Saved compression data:** rejects missing parameter lists, non-boolean compression
+  flags and duplicate fields instead of accepting uncertain desktop/mobile layouts.
 - **Cached decisions:** background checks update a project-local cache, valid for 30 days.
   Downloaded changes apply after a script reload, never during a bake. Settings show the
   current decision and offer a manual approval check.
 - **VRCFury dependency range:** permits 1.1427.0 through later 1.x releases to be installed;
-  installation alone does not approve a combination. The initial catalog is empty pending
-  Unity validation of 1.2.5.
+  installation alone does not approve a combination. The prepared catalog approves
+  1.2.5 with VRCFury 1.1427.0 after Unity tests and avatar bake comparisons.
 - **Current feature documentation:** both READMEs now distinguish active optimizations from
   retired modules and label older performance measurements with their tested version.
 

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
 
 namespace FuryPlusPlus {
@@ -23,16 +24,6 @@ namespace FuryPlusPlus {
             public bool compressorLanePacking;
             public string compressorSub8List = "";
             public int compressorAlgoVersion;
-        }
-
-        [Serializable]
-        private class VrcfurySavedData {
-            public List<VrcfurySavedParam> parameters;
-        }
-
-        [Serializable]
-        private struct VrcfurySavedParam {
-            public bool compressed;
         }
 
         internal const int AlgorithmVersion = 1;
@@ -213,9 +204,12 @@ namespace FuryPlusPlus {
             compressed = false;
             if (string.IsNullOrWhiteSpace(json)) return false;
             try {
-                var data = JsonUtility.FromJson<VrcfurySavedData>(json);
-                if (data?.parameters == null) return false;
-                compressed = data.parameters.Any(parameter => parameter.compressed);
+                var data = JObject.Parse(json, new JsonLoadSettings { DuplicatePropertyNameHandling = DuplicatePropertyNameHandling.Error });
+                if (!(data["parameters"] is JArray parameters)) return false;
+                foreach (var parameter in parameters) {
+                    if (!(parameter is JObject entry) || entry["compressed"]?.Type != JTokenType.Boolean) return false;
+                    compressed |= (bool)entry["compressed"];
+                }
                 return true;
             } catch {
                 return false;

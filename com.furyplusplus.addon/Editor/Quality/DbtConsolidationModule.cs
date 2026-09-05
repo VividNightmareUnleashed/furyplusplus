@@ -69,6 +69,9 @@ namespace FuryPlusPlus {
 
         internal static void Resolve() {
             ToggleTreeCompat.EnsureResolved();
+            ToggleTreeCompat.DemandStatePlayback();
+            ReflectionUtils.Demand(ToggleTreeCompat.LayerBlendingMode, "VFLayer.blendingMode");
+            ReflectionUtils.Demand(ToggleTreeCompat.StateWriteDefaults, "VFState.writeDefaultValues");
             ReflectionUtils.Demand(ToggleTreeCompat.LayerType, "VF.Utils.Controller.VFLayer");
             ReflectionUtils.Demand(ToggleTreeCompat.LayerStateMachine, "VFLayer.stateMachine");
             ReflectionUtils.Demand(ToggleTreeCompat.LayerHasSubMachines, "VFLayer.hasSubMachines");
@@ -133,9 +136,15 @@ namespace FuryPlusPlus {
                     }
                 }
 
+                var layers = ((IEnumerable)getLayers.Invoke(fx, null)).Cast<object>().ToArray();
+                var layerBindings = layers.ToDictionary(layer => layer, layer => new HashSet<object>(
+                    ((IEnumerable)ReflectionUtils.InvokeUnwrapped(
+                        getBindingsAnimatedInLayer, layerToTree, new[] { layer })).Cast<object>()));
                 var candidates = new List<(object Layer, object Tree, HashSet<object> Bindings)>();
-                foreach (var layer in ((IEnumerable)getLayers.Invoke(fx, null)).Cast<object>()) {
+                foreach (var layer in layers) {
                     if (defaultLayer != null && ReferenceEquals(defaultLayer, layer)) continue;
+                    if ((AnimatorLayerBlendingMode)ToggleTreeCompat.LayerBlendingMode.GetValue(layer)
+                        != AnimatorLayerBlendingMode.Override) continue;
 
                     var machine = ToggleTreeCompat.LayerStateMachine.GetValue(layer);
                     if (machine == null) continue;
@@ -150,6 +159,8 @@ namespace FuryPlusPlus {
                             ToggleTreeCompat.SmBehaviours.GetValue(machine)) != 0) continue;
                     var state = states[0];
                     if (state == null) continue;
+                    if (!ToggleConversionRuntime.HasDefaultPlayback(state)) continue;
+                    if (!(bool)ToggleTreeCompat.StateWriteDefaults.GetValue(state)) continue;
                     if (!ReferenceEquals(ToggleTreeCompat.SmDefaultState.GetValue(machine), state)) continue;
                     if (ToggleConversionRuntime.TransitionsOf(state).Count != 0) continue;
                     if (ToggleConversionRuntime.CountOf(
@@ -169,8 +180,7 @@ namespace FuryPlusPlus {
 
                     var bindings = new HashSet<object>();
                     var writesAaps = false;
-                    foreach (var binding in (IEnumerable)ReflectionUtils.InvokeUnwrapped(
-                                 getBindingsAnimatedInLayer, layerToTree, new[] { layer })) {
+                    foreach (var binding in layerBindings[layer]) {
                         if (ClipCurveCompat.IsAnimatorBinding(binding)) { writesAaps = true; break; }
                         bindings.Add(binding);
                     }
@@ -186,17 +196,20 @@ namespace FuryPlusPlus {
 
                 // Greedy grouping in layer order with pairwise-disjoint write sets.
                 var target = candidates[0];
-                var targetBindings = new HashSet<object>(target.Bindings);
+                var eligible = candidates.ToDictionary(candidate => candidate.Layer);
                 var merged = new List<object>();
-                foreach (var donor in candidates.Skip(1)) {
-                    if (donor.Bindings.Overlaps(targetBindings)) continue;
+                var targetIndex = Array.IndexOf(layers, target.Layer);
+                var eligibleIndices = new HashSet<int>(Enumerable.Range(0, layers.Length)
+                    .Where(index => eligible.ContainsKey(layers[index])));
+                foreach (var index in SelectDonors(layers.Select(layer => layerBindings[layer]).ToArray(),
+                             eligibleIndices, targetIndex)) {
+                    var donor = eligible[layers[index]];
                     // VFTree.children is read-only now; append through AddChild instead of
                     // rebuilding the array.
                     foreach (var child in (IEnumerable)ToggleTreeCompat.TreeChildren.GetValue(donor.Tree)) {
                         ReflectionUtils.InvokeUnwrapped(
                             ToggleTreeCompat.TreeAddChild, target.Tree, new[] { child });
                     }
-                    foreach (var binding in donor.Bindings) targetBindings.Add(binding);
                     merged.Add(donor.Layer);
                 }
                 foreach (var donor in merged) {
@@ -212,6 +225,18 @@ namespace FuryPlusPlus {
             } catch (Exception e) {
                 Log.Warn("DBT consolidation skipped: " + e.Message);
             }
+        }
+
+        internal static List<int> SelectDonors(IReadOnlyList<HashSet<object>> bindings,
+            ISet<int> eligible, int target) {
+            var selected = new List<int>();
+            var crossed = new HashSet<object>(bindings[target]);
+            for (var index = target + 1; index < bindings.Count; index++) {
+                // Every crossed layer retains its override priority, including non-candidates.
+                if (eligible.Contains(index) && !bindings[index].Overlaps(crossed)) selected.Add(index);
+                crossed.UnionWith(bindings[index]);
+            }
+            return selected;
         }
 
         /** Walks a VFTree (and any nested VFTrees) looking for a blend parameter an FX clip AAP-writes. */

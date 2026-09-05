@@ -14,7 +14,7 @@ namespace FuryPlusPlus {
      * fails closed at its own Install().
      */
     internal static class BuildPhaseHooks {
-        private sealed class Hook {
+        internal sealed class Hook {
             internal string ModuleId;
             internal string PhaseName;
             internal int Threshold;
@@ -166,7 +166,8 @@ namespace FuryPlusPlus {
             return __exception;
         }
 
-        private static void Fire(Hook hook, object service) {
+        internal static void Fire(Hook hook, object service) {
+            if (!ModuleRegistry.IsOn(ModuleRegistry.Find(hook.ModuleId))) return;
             try {
                 hook.Callback(service);
             } catch (Exception e) {

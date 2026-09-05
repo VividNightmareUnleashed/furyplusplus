@@ -111,8 +111,11 @@ namespace FuryPlusPlus {
                     "LayerToTreeService.Optimize(AnimatorCondition, VFMotion, VFMotion, tree)");
             }
 
-            BuildPhaseHooks.RegisterBefore("LayerToTree", OffSideEliminationModule.Instance.Id,
-                _ => PrepareForRun());
+            harmony.Patch(
+                ReflectionUtils.Demand(ToggleTreeCompat.LayerToTreeApply, "LayerToTreeService.Apply()"),
+                prefix: new HarmonyMethod(typeof(OffSideEliminationPatch), nameof(PrepareForRun)),
+                finalizer: new HarmonyMethod(typeof(OffSideEliminationPatch), nameof(EndRun))
+            );
 
             harmony.Patch(
                 optimizeLayer,
@@ -174,6 +177,14 @@ namespace FuryPlusPlus {
                 defaultLayer = null;
                 Log.Warn("Off-side elimination fell back to VRCFury: " + e.Message);
             }
+        }
+
+        private static Exception EndRun(Exception __exception) {
+            conflictingBindings = null;
+            defaultLayer = null;
+            currentLayer = null;
+            layersByBinding = null;
+            return __exception;
         }
 
         // __0 is the layer being converted, __2 the binding→layers reverse index. Both stay

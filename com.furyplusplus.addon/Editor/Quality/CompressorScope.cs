@@ -97,6 +97,8 @@ namespace FuryPlusPlus {
         }
 
         private static void ApplyPrefix() {
+            lastPairsKey = null;
+            lastPairs = null;
             LanePackingActive = ModuleRegistry.IsOn(CompressorLanePackingModule.Instance);
             Sub8Active = ModuleRegistry.IsOn(CompressorSub8Module.Instance);
             Sub8Globs = Sub8Active

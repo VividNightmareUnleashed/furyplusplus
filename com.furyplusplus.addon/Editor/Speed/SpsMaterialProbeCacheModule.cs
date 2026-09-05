@@ -41,9 +41,11 @@ namespace FuryPlusPlus {
         // probes never read the registry.
         private static SpsProbeResultMap ResultsByKey;
         private static bool runActive;
+        private static string probeImplementation;
 
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
             SpsCompat.DemandMaterialProbe();
+            probeImplementation = compatibility.PackageVersion + ":" + compatibility.ModuleVersionId;
 
             harmony.Patch(
                 SpsCompat.HasDpsOrTpsMaterial,
@@ -154,7 +156,7 @@ namespace FuryPlusPlus {
 
         private static string BuildSignature(Material[] materials) {
             var builder = new StringBuilder();
-            builder.Append(Application.unityVersion).Append('|');
+            builder.Append(Application.unityVersion).Append('|').Append(probeImplementation).Append('|');
             foreach (var material in materials) {
                 if (material == null) {
                     builder.Append("null;");

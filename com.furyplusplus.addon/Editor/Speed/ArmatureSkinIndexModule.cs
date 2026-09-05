@@ -6,9 +6,8 @@ using UnityEngine;
 namespace FuryPlusPlus {
     /**
      * Replaces Armature Link's per-bone skin mutation with one chronological replay per
-     * skin. VRCFury normally clones and assigns the same bones/bindposes arrays thousands
-     * of times; this records the exact transforms at each call and commits each skin once
-     * immediately before deferred hierarchy moves are applied.
+     * skin. Records the transforms at each call and commits before VRCFury reads skin
+     * state to name linked roots or prune unused bones.
      */
     internal sealed class ArmatureSkinIndexModule : Module<ArmatureSkinIndexModule> {
 
@@ -40,16 +39,11 @@ namespace FuryPlusPlus {
         [ThreadStatic] private static Context active;
 
         internal static void Install(Harmony harmony, VrcfuryCompat compatibility) {
-            // PORT-NOTE: this used to flush on ObjectMoveService.ApplyDeferred, which VRCFury
-            // 1.1370 removed along with the whole deferred-move mechanism (moves are immediate
-            // now, and animations retarget through VFResolvedObject instead of path rewrites).
-            // The batch instead flushes wherever ArmatureLinkService itself reads skin state:
-            // GetRootName tests `skin.bones.Contains(...)`, and with several links on one avatar
-            // it runs after an earlier link's RewriteSkins. Flushing there keeps every in-Apply
-            // read seeing committed bones, so batching stays invisible to VRCFury.
+            // Both root naming and pruning must see the latest bone references.
             ArmatureCompat.DemandArmatureLink();
             ReflectionUtils.Demand(ArmatureCompat.RewriteSkins, "ArmatureLinkService.RewriteSkins(...)");
             ReflectionUtils.Demand(ArmatureCompat.GetRootName, "ArmatureLinkService.GetRootName(...)");
+            ReflectionUtils.Demand(ArmatureCompat.GetUsageReasons, "ArmatureLinkService.GetUsageReasons(...)");
             ReflectionUtils.Demand(ArmatureCompat.GetMutableMesh, "RendererExtensions.GetMutableMesh(...)");
             ReflectionUtils.Demand(ArmatureCompat.Dirty, "DirtyUtils.Dirty(Object)");
 
@@ -64,6 +58,10 @@ namespace FuryPlusPlus {
             );
             harmony.Patch(
                 ArmatureCompat.GetRootName,
+                prefix: new HarmonyMethod(typeof(ArmatureSkinIndexPatch), nameof(Flush))
+            );
+            harmony.Patch(
+                ArmatureCompat.GetUsageReasons,
                 prefix: new HarmonyMethod(typeof(ArmatureSkinIndexPatch), nameof(Flush))
             );
         }

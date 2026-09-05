@@ -15,8 +15,8 @@ over).
 FuryPlusPlus 1.2.5 targets VRCFury 1.1427.0. Historical measurements with FuryPlusPlus 1.2.0
 and VRCFury 1.1382.0 reduced a reference-avatar bake from **about 33 seconds to 3.7 seconds**,
 with most remaining savings coming from Armature Link. These are not measurements of the
-current release; gains depend on the avatar and enabled modules. Unity tests and bake validation
-for 1.2.5 are pending.
+current release; gains depend on the avatar and enabled modules. Version 1.2.5 passed 129 Unity
+EditMode tests and stock/optimized avatar bake comparisons with VRCFury 1.1427.0.
 
 ## Requirements and compatibility
 
@@ -43,7 +43,22 @@ working setup. On a first install, check approvals in FuryPlusPlus settings,
 then restart Unity or reload scripts after an approval is downloaded. Downloaded
 changes always wait for a script reload; they never change patches during a bake.
 The settings window shows the current decision and a **Check once on GitHub**
-button that does not enable automatic checks. The initial 1.2.5 approval remains pending Unity validation.
+button that does not enable automatic checks. The tested 1.2.5/1.1427.0 approval has
+been prepared locally and becomes available after the catalog is published.
+
+## Fury++ updates
+
+In **Tools > FuryPlusPlus > Settings**, opt in to automatic Fury++ release checks
+or use **Check for updates** once. Automatic checks contact GitHub Pages at Editor
+startup and daily; this consent is separate from VRCFury compatibility checks.
+Every installation asks for confirmation, verifies the release checksum and
+compatibility approval, and keeps a backup of the package and its VPM record.
+
+The updater supports ordinary packages inside the project's `Packages` folder.
+Updates with changed Unity or dependency requirements use Creator Companion.
+Linked packages and Git checkouts use their original installation source.
+VRCFury and the VRChat SDK are not updated. See the
+[update and recovery guide](https://github.com/VividNightmareUnleashed/furyplusplus/blob/master/UPDATES.md).
 
 ## Install
 
@@ -52,7 +67,7 @@ button that does not enable automatic checks. The initial 1.2.5 approval remains
    present, but the package should not stay installed.)
 3. Add the package through the Creator Companion or by hand — both methods below.
 4. Check that the installed combination is approved in FuryPlusPlus settings. Once approved and reloaded, the Console should report
-   `[FuryPlusPlus] Ready: 29/29 modules installed for VRCFury 1.1427.0, 15 superseded`.
+   `[FuryPlusPlus] Ready: 30/30 modules installed for VRCFury 1.1427.0, 15 superseded`.
 
 ### Via the VRChat Creator Companion (recommended)
 

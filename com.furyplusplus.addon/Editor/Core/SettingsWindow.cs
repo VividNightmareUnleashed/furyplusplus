@@ -166,10 +166,12 @@ namespace FuryPlusPlus {
         }
 
         private string lastApprovalStatus;
+        private string lastUpdateStatus;
 
         private void OnInspectorUpdate() {
-            if (lastApprovalStatus == CompatibilityApprovals.Status) return;
+            if (lastApprovalStatus == CompatibilityApprovals.Status && lastUpdateStatus == UpdateService.Status) return;
             lastApprovalStatus = CompatibilityApprovals.Status;
+            lastUpdateStatus = UpdateService.Status;
             Repaint();
         }
 
@@ -178,6 +180,7 @@ namespace FuryPlusPlus {
             scroll = EditorGUILayout.BeginScrollView(scroll);
             EditorGUILayout.Space();
             DrawStatusBanner();
+            DrawUpdateSettings();
             EditorGUILayout.Space();
             DrawHeader();
             EditorGUILayout.Space();
@@ -732,6 +735,27 @@ namespace FuryPlusPlus {
                 EditorStyles.wordWrappedMiniLabel);
             using (new EditorGUI.DisabledScope(CompatibilityApprovals.IsChecking)) {
                 if (GUILayout.Button("Check once on GitHub")) CompatibilityApprovals.CheckNow();
+            }
+        }
+
+        private static void DrawUpdateSettings() {
+            UpdateService.Initialize();
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Fury++ updates", EditorStyles.boldLabel);
+            var automatic = Settings.AutomaticUpdateChecks == true;
+            var enabled = EditorGUILayout.ToggleLeft(new GUIContent("Automatically check for Fury++ updates",
+                "Check GitHub Pages at Editor startup and daily. GitHub receives your IP address, but no avatar data "
+                + "or installed version information. Installing always requires confirmation."), automatic);
+            if (enabled != automatic) UpdateService.SetAutomaticChecks(enabled);
+            EditorGUILayout.HelpBox(UpdateService.Status, MessageType.None);
+            using (new EditorGUILayout.HorizontalScope()) {
+                using (new EditorGUI.DisabledScope(UpdateService.IsBusy || !UpdateService.EditorIsIdle)) {
+                    if (GUILayout.Button("Check for updates")) UpdateService.CheckNow();
+                    if (UpdateService.Available != null && GUILayout.Button("Install " + UpdateService.Available.Version))
+                        UpdateService.InstallAvailable();
+                }
+                if (UpdateService.Available != null && GUILayout.Button("Release notes"))
+                    Application.OpenURL(UpdateService.Available.NotesUrl);
             }
         }
 

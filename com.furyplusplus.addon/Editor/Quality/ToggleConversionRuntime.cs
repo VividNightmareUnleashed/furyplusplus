@@ -162,6 +162,7 @@ namespace FuryPlusPlus {
          */
         internal static bool PassesCommonLayerGuards(Snapshot snapshot, Entry entry) {
             if (entry.IsDefaultLayer || entry.StateMachine == null) return false;
+            if (ToggleTreeCompat.LayerMask.GetValue(entry.VfLayer) != null) return false;
             if (!Mathf.Approximately((float)ToggleTreeCompat.LayerWeight.GetValue(entry.VfLayer), 1f)) return false;
             if ((AnimatorLayerBlendingMode)ToggleTreeCompat.LayerBlendingMode.GetValue(entry.VfLayer)
                 == AnimatorLayerBlendingMode.Additive) return false;
@@ -173,8 +174,7 @@ namespace FuryPlusPlus {
             foreach (var state in StatesOf(entry.StateMachine)) {
                 if (state == null) return false;
                 if (CountOf(ToggleTreeCompat.StateBehaviours.GetValue(state)) != 0) return false;
-                if ((bool)ToggleTreeCompat.StateTimeParamActive.GetValue(state)) return false;
-                if ((bool)ToggleTreeCompat.StateSpeedParamActive.GetValue(state)) return false;
+                if (!HasDefaultPlayback(state)) return false;
             }
             // Rotations behave differently inside blend trees (mirror of stock guard). The
             // per-layer index is already normalized with combineRotation, so every rotation
@@ -183,6 +183,16 @@ namespace FuryPlusPlus {
                 if (ClipCurveCompat.PropertyNameOf(binding) == "rotation") return false;
             }
             return true;
+        }
+
+        internal static bool HasDefaultPlayback(object state) {
+            return (float)ToggleTreeCompat.StateSpeed.GetValue(state) == 1f
+                && !(bool)ToggleTreeCompat.StateTimeParamActive.GetValue(state)
+                && !(bool)ToggleTreeCompat.StateSpeedParamActive.GetValue(state)
+                && !(bool)ToggleTreeCompat.StateMirror.GetValue(state)
+                && !(bool)ToggleTreeCompat.StateMirrorParamActive.GetValue(state)
+                && (float)ToggleTreeCompat.StateCycleOffset.GetValue(state) == 0f
+                && !(bool)ToggleTreeCompat.StateCycleOffsetParamActive.GetValue(state);
         }
 
         /**

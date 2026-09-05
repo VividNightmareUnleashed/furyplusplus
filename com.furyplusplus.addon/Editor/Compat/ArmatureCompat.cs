@@ -29,6 +29,7 @@ namespace FuryPlusPlus {
         internal static MethodInfo VfGetUploadRoots { get; private set; }
         internal static MethodInfo RewriteSkins { get; private set; }
         internal static MethodInfo GetRootName { get; private set; }
+        internal static MethodInfo GetUsageReasons { get; private set; }
         internal static MethodInfo GetMutableMesh { get; private set; }
         internal static MethodInfo Dirty { get; private set; }
 
@@ -64,6 +65,10 @@ namespace FuryPlusPlus {
             GetRootName = ReflectionUtils.FindUniqueMethod(
                 armatureType, "GetRootName",
                 method => method.ReturnType == typeof(string) && method.GetParameters().Length == 2);
+            GetUsageReasons = ReflectionUtils.FindUniqueMethod(
+                armatureType, "GetUsageReasons",
+                method => method.IsStatic && method.GetParameters().Length == 1
+                    && method.GetParameters()[0].ParameterType.FullName == "VF.Utils.VFGameObject");
             GetMutableMesh = ReflectionUtils.FindMethodWithSignature(
                 ReflectionUtils.FindType("VF.Utils.RendererExtensions"),
                 "GetMutableMesh", typeof(Mesh), typeof(Renderer), typeof(string));

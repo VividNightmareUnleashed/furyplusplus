@@ -165,6 +165,7 @@ namespace FuryPlusPlus {
                 || ReferenceEquals(onState, off)
                 || ReferenceEquals(onState, inState)) return null;
             var fadeIn = ToggleConversionRuntime.DurationOf(toOn);
+            if (!(bool)ToggleTreeCompat.TrHasFixedDuration.GetValue(toOn)) return null;
 
             var onMotion = ToggleConversionRuntime.MotionOf(onState);
             if (!ToggleConversionRuntime.MotionIsStatic(onMotion)) return null;
@@ -188,6 +189,7 @@ namespace FuryPlusPlus {
                 || ReferenceEquals(outState, inState)
                 || ReferenceEquals(outState, onState)) return null;
             var fadeOut = ToggleConversionRuntime.DurationOf(toOut);
+            if (!(bool)ToggleTreeCompat.TrHasFixedDuration.GetValue(toOut)) return null;
 
             // Out → exit unconditionally, instantly.
             if (ToggleConversionRuntime.MotionHasValidBinding(

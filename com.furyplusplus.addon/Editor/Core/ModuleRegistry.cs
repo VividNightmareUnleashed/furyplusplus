@@ -79,6 +79,7 @@ namespace FuryPlusPlus {
             new BakeCacheReplayModule(),
             // --- UI: keeps the liquid progress bar animating inside long phases ---
             new ProgressPumpModule(),
+            new UpdateModule(),
         };
 
         private static readonly Dictionary<string, (ModuleState State, string Message)> Statuses =

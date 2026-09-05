@@ -88,6 +88,14 @@ namespace FuryPlusPlus {
             return active != null && active.Approves(furyPlusPlus, vrcfury);
         }
 
+        internal static void SaveForNextReload(CompatibilityCatalog catalog) {
+            Initialize();
+            if (!catalog.CanReplace(latest)) throw new InvalidDataException("Compatibility list is older than the cached decision.");
+            CompatibilityCache.Write(cachePath, catalog, DateTime.UtcNow);
+            latest = catalog;
+            Status = "Approvals saved. Restart Unity or reload scripts to apply them.";
+        }
+
         internal static void CheckNow() {
             Initialize();
             if (request != null) return;
@@ -118,8 +126,7 @@ namespace FuryPlusPlus {
                     Status = "GitHub returned an invalid or older approval list. Existing approvals are unchanged.";
                     return;
                 }
-                CompatibilityCache.Write(cachePath, catalog, DateTime.UtcNow);
-                latest = catalog;
+                SaveForNextReload(catalog);
                 var nowApproved = catalog.Approves(PackageIdentity.Version, VrcfuryCompat.LoadedPackageVersion());
                 var wasApproved = active != null
                                   && active.Approves(PackageIdentity.Version, VrcfuryCompat.LoadedPackageVersion());

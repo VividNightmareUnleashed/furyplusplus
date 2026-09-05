@@ -61,6 +61,10 @@ namespace FuryPlusPlus {
                 "VFBinding.TryGetCurrentFloat(root, out value)");
 
             ToggleTreeCompat.EnsureResolved();
+            ReflectionUtils.Demand(ToggleTreeCompat.LayerBlendingMode, "VFLayer.blendingMode");
+            ReflectionUtils.Demand(ToggleTreeCompat.LayerType, "VFLayer");
+            ReflectionUtils.Demand(ClipCurveCompat.ControllerGetLayers, "VFController.GetLayers()");
+            ReflectionUtils.Demand(ClipCurveCompat.BindingNormalize, "VFBinding.Normalize(bool)");
             getDefaultClip = ReflectionUtils.Demand(
                 ToggleTreeCompat.GetDefaultClip, "FixWriteDefaultsService.GetDefaultClip()");
         }
@@ -79,10 +83,12 @@ namespace FuryPlusPlus {
             // Collect every clip of every used controller once. Clips are in-memory VFClip
             // objects, so identity is reference identity.
             var clips = new HashSet<object>();
+            var additiveClips = new HashSet<object>();
             foreach (var manager in ClipCurveCompat.UsedControllers(controllersService)) {
                 foreach (var clip in ClipCurveCompat.ClipsFrom(manager)) {
                     if (clip != null) clips.Add(clip);
                 }
+                additiveClips.UnionWith(AdditiveClipsFrom(manager));
             }
 
             // Pass 1: classify every (binding, curve). A binding is strippable only if EVERY
@@ -105,26 +111,33 @@ namespace FuryPlusPlus {
                 foreach (var entry in curves) {
                     var binding = ClipCurveCompat.TupleBinding(entry);
                     var curve = ClipCurveCompat.TupleCurve(entry);
+                    var normalized = ClipCurveCompat.Normalize(binding, true);
+
+                    // An additive rest-value curve can still contribute a nonzero delta.
+                    if (additiveClips.Contains(clip)) {
+                        blockedBindings.Add(normalized);
+                        continue;
+                    }
 
                     // AAPs and humanoid muscles are animator-stream values, not scene
                     // properties — they have no resting value to fall back to. Never touch.
                     if (ClipCurveCompat.IsAnimatorBinding(binding)) {
-                        blockedBindings.Add(binding);
+                        blockedBindings.Add(normalized);
                         continue;
                     }
                     if (curve == null || !ClipCurveCompat.IsFloat(curve)) {
-                        blockedBindings.Add(binding);
+                        blockedBindings.Add(normalized);
                         continue;
                     }
                     var floatCurve = ClipCurveCompat.FloatCurveOf(curve);
                     if (floatCurve == null || !IsConstant(floatCurve, out var value)) {
-                        blockedBindings.Add(binding);
+                        blockedBindings.Add(normalized);
                         continue;
                     }
                     var rest = RestOf(binding);
                     if (!rest.Known
                         || !ValuesMatch(ClipCurveCompat.PropertyNameOf(binding), value, rest.Value)) {
-                        blockedBindings.Add(binding);
+                        blockedBindings.Add(normalized);
                         continue;
                     }
                     candidates.Add((clip, binding, value));
@@ -135,7 +148,7 @@ namespace FuryPlusPlus {
             // VFClip.SetCurves flags the clip as changed-from-source, so a clip that keeps all
             // its curves is never touched and stays eligible to alias its original user asset.
             var byClip = candidates
-                .Where(candidate => !blockedBindings.Contains(candidate.Binding))
+                .Where(candidate => !blockedBindings.Contains(ClipCurveCompat.Normalize(candidate.Binding, true)))
                 .Where(candidate => !ReferenceEquals(candidate.Clip, defaultClip))
                 .GroupBy(candidate => candidate.Clip);
 
@@ -170,11 +183,19 @@ namespace FuryPlusPlus {
             LastStats = strippedCurves == 0 ? null : $"curves={strippedCurves} clips={touchedClips}";
         }
 
-        /**
-         * The shared "no-op write at rest" doctrine — OffSideEliminationPatch applies the
-         * same rules to a candidate off clip; both modules' safety arguments depend on this
-         * single definition.
-         */
+        internal static IEnumerable<object> AdditiveClipsFrom(object controller) {
+            foreach (var layer in (IEnumerable)ClipCurveCompat.ControllerGetLayers.Invoke(controller, null)) {
+                if ((UnityEditor.Animations.AnimatorLayerBlendingMode)
+                    ToggleTreeCompat.LayerBlendingMode.GetValue(layer)
+                    != UnityEditor.Animations.AnimatorLayerBlendingMode.Additive) continue;
+                var selection = Array.CreateInstance(ToggleTreeCompat.LayerType, 1);
+                selection.SetValue(layer, 0);
+                foreach (var clip in (IEnumerable)ClipCurveCompat.ControllerGetClips.Invoke(
+                             controller, new object[] { selection })) yield return clip;
+            }
+        }
+
+        /** Shared constant-curve check used by off-side elimination. */
         internal static bool IsConstant(AnimationCurve curve, out float value) {
             value = 0;
             var keys = curve.keys;

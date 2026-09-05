@@ -28,9 +28,9 @@ namespace FuryPlusPlus {
     internal sealed class BlendshapeBakeRewriteModule : Module<BlendshapeBakeRewriteModule> {
         internal static readonly ModuleOption FixMultiFrameInterpolation = new ModuleOption(
             "fixMultiFrameInterpolation", "Fix multi-frame blendshape interpolation", true,
-            "VRCFury selects the interpolation frame by comparing the weight against the frame " +
-            "COUNT (and errors when the weight exceeds it). This selects by frame weight as " +
-            "intended. Disable for stock-identical (buggy) behavior.",
+            "Selects interpolation frames by their weights and corrects the extra division " +
+            "by 100 below the first frame. Disable for stock-identical behavior, including " +
+            "VRCFury's frame-selection and scaling bugs.",
             affectsBakeOutput: true);
 
         private static readonly ModuleOption[] AllOptions = {
@@ -326,7 +326,8 @@ namespace FuryPlusPlus {
                 if (beforeFrame == 0) {
                     var fw = originalMesh.GetBlendShapeFrameWeight(id, 0);
                     originalMesh.GetBlendShapeFrameVertices(id, 0, bufferV, bufferN, bufferT);
-                    Accumulate(verts, normals, tangents, bufferV, bufferN, bufferT, weight100 / fw);
+                    Accumulate(verts, normals, tangents, bufferV, bufferN, bufferT,
+                        weight100 / fw * (fix ? 100f : 1f));
                     bakedAny = true;
                 } else {
                     var fw1 = originalMesh.GetBlendShapeFrameWeight(id, beforeFrame - 1);

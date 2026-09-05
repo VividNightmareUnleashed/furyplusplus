@@ -81,6 +81,7 @@ namespace FuryPlusPlus {
             if (string.IsNullOrEmpty(parameter.name)) return Verdict.Ineligible;
             if (parameter.defaultValue != 0 && parameter.defaultValue != 1) return Verdict.Ineligible;
             if (keepGlobs.Any(glob => glob.IsMatch(parameter.name))) return Verdict.Ineligible;
+            if (index.DynamicsParams.Contains(parameter.name)) return Verdict.Ineligible;
 
             index.Details.TryGetValue(parameter.name, out var detail);
             var isRead = index.Reads.Contains(parameter.name);

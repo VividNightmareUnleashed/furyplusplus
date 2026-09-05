@@ -29,6 +29,7 @@ namespace FuryPlusPlus.Tests.Editor {
         [TestCase("{\"parameters\":[{\"compressed\":true}]}", true)]
         [TestCase("{ \"parameters\" : [ { \"compressed\" : true } ] }", true)]
         [TestCase("{\"parameters\":[{\"compressed\":false}]}", false)]
+        [TestCase("{\"parameters\":[]}", false)]
         public void VrcfuryCompressionParserUsesStructuredJson(string json, bool expected) {
             Assert.That(FppSidecar.TryParseVrcfuryCompression(json, out var compressed), Is.True);
             Assert.That(compressed, Is.EqualTo(expected));
@@ -36,6 +37,10 @@ namespace FuryPlusPlus.Tests.Editor {
 
         [TestCase("")]
         [TestCase("{}")]
+        [TestCase("{\"parameters\":null}")]
+        [TestCase("{\"parameters\":[{}]}")]
+        [TestCase("{\"parameters\":[{\"compressed\":\"false\"}]}")]
+        [TestCase("{\"parameters\":[{\"compressed\":true,\"compressed\":false}]}")]
         [TestCase("not json")]
         public void VrcfuryCompressionParserRejectsUncertainData(string json) {
             Assert.That(FppSidecar.TryParseVrcfuryCompression(json, out _), Is.False);

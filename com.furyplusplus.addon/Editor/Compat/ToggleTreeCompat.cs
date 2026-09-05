@@ -21,6 +21,12 @@ namespace FuryPlusPlus {
      */
     internal static class ToggleTreeCompat {
         private static bool resolved;
+        internal static MethodInfo LayerToTreeApply;
+        internal static PropertyInfo StateSpeed;
+        internal static PropertyInfo StateMirror;
+        internal static PropertyInfo StateMirrorParamActive;
+        internal static PropertyInfo StateCycleOffset;
+        internal static PropertyInfo StateCycleOffsetParamActive;
 
         // Layer / controller plumbing
         internal static MethodInfo GetFx;                      // ControllersService.GetFx()
@@ -148,6 +154,7 @@ namespace FuryPlusPlus {
             var transitionBaseType = ReflectionUtils.FindType("VF.Utils.Controller.VFTransitionBase");
             var transitionType = ReflectionUtils.FindType("VF.Utils.Controller.VFTransition");
             var layerToTreeType = ReflectionUtils.FindType("VF.Service.LayerToTreeService");
+            LayerToTreeApply = ReflectionUtils.FindNoArgVoid(layerToTreeType, "Apply");
             var layerControlType = ReflectionUtils.FindType("VF.Service.AnimatorLayerControlOffsetService");
             var fixWdType = ReflectionUtils.FindType("VF.Service.FixWriteDefaultsService");
             var validateType = ReflectionUtils.FindType("VF.Service.ValidateBindingsService");
@@ -220,6 +227,11 @@ namespace FuryPlusPlus {
                 StateName = stateType.GetProperty("name", inst);
                 StateTimeParamActive = stateType.GetProperty("timeParameterActive", inst);
                 StateSpeedParamActive = stateType.GetProperty("speedParameterActive", inst);
+                StateSpeed = stateType.GetProperty("speed", inst);
+                StateMirror = stateType.GetProperty("mirror", inst);
+                StateMirrorParamActive = stateType.GetProperty("mirrorParameterActive", inst);
+                StateCycleOffset = stateType.GetProperty("cycleOffset", inst);
+                StateCycleOffsetParamActive = stateType.GetProperty("cycleOffsetParameterActive", inst);
             }
             if (transitionBaseType != null) {
                 TrConditions = transitionBaseType.GetProperty("conditions", inst);
@@ -360,6 +372,9 @@ namespace FuryPlusPlus {
             ReflectionUtils.Demand(StateBehaviours, "VFState.behaviours");
             ReflectionUtils.Demand(StateTimeParamActive, "VFState.timeParameterActive");
             ReflectionUtils.Demand(StateSpeedParamActive, "VFState.speedParameterActive");
+            DemandStatePlayback();
+            ReflectionUtils.Demand(LayerMask, "VFLayer.mask");
+            ReflectionUtils.Demand(TrHasFixedDuration, "VFTransition.hasFixedDuration");
             ReflectionUtils.Demand(TrConditions, "VFTransitionBase.conditions");
             ReflectionUtils.Demand(TrDestinationState, "VFTransitionBase.destinationState");
             ReflectionUtils.Demand(TrIsExit, "VFTransitionBase.isExit");
@@ -388,6 +403,15 @@ namespace FuryPlusPlus {
         }
 
         // ---- invocation wrappers ----
+        internal static void DemandStatePlayback() {
+            ReflectionUtils.Demand(StateSpeed, "VFState.speed");
+            ReflectionUtils.Demand(StateMirror, "VFState.mirror");
+            ReflectionUtils.Demand(StateMirrorParamActive, "VFState.mirrorParameterActive");
+            ReflectionUtils.Demand(StateCycleOffset, "VFState.cycleOffset");
+            ReflectionUtils.Demand(StateCycleOffsetParamActive, "VFState.cycleOffsetParameterActive");
+            ReflectionUtils.Demand(StateTimeParamActive, "VFState.timeParameterActive");
+            ReflectionUtils.Demand(StateSpeedParamActive, "VFState.speedParameterActive");
+        }
 
         /** An empty in-memory clip. Replaces VrcfObjectFactory.Create<AnimationClip>(). */
         internal static object NewEmptyClip(string name) {

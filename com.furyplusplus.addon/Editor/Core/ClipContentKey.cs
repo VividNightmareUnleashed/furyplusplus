@@ -30,10 +30,10 @@ namespace FuryPlusPlus {
 
             foreach (var animationEvent in AnimationUtility.GetAnimationEvents(clip)) {
                 builder.Append("event|").Append(Float(animationEvent.time)).Append('|')
-                    .Append(animationEvent.functionName).Append('|')
+                    .Append(Text(animationEvent.functionName)).Append('|')
                     .Append(Float(animationEvent.floatParameter)).Append('|')
                     .Append(animationEvent.intParameter).Append('|')
-                    .Append(animationEvent.stringParameter).Append('|')
+                    .Append(Text(animationEvent.stringParameter)).Append('|')
                     .Append(ObjectId(animationEvent.objectReferenceParameter)).Append('|')
                     .Append(animationEvent.messageOptions).AppendLine();
             }
@@ -48,9 +48,9 @@ namespace FuryPlusPlus {
             if (curve == null) return false;
             var isFloat = ClipCurveCompat.IsFloat(curve);
             builder.Append(isFloat ? "float|" : "object|")
-                .Append(binding.path).Append('|')
-                .Append(binding.type?.AssemblyQualifiedName).Append('|')
-                .Append(binding.propertyName).Append('|')
+                .Append(Text(binding.path)).Append('|')
+                .Append(Text(binding.type?.AssemblyQualifiedName)).Append('|')
+                .Append(Text(binding.propertyName)).Append('|')
                 .Append(binding.isPPtrCurve).Append('|')
                 .Append(binding.isDiscreteCurve).AppendLine();
 
@@ -98,6 +98,10 @@ namespace FuryPlusPlus {
 
         private static string Float(float value) {
             return value.ToString("R", CultureInfo.InvariantCulture);
+        }
+
+        private static string Text(string value) {
+            return Newtonsoft.Json.JsonConvert.ToString(value);
         }
 
         private static string Value(object value) {

@@ -53,12 +53,12 @@ namespace FuryPlusPlus {
                 var pairs = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
                 var count = 0;
                 foreach (var approval in document.approved) {
-                    if (approval == null || !IsReleaseVersion(approval.furyPlusPlus)
+                    if (approval == null || !ReleaseVersion.IsStable(approval.furyPlusPlus)
                                          || approval.vrcfury == null
                                          || pairs.ContainsKey(approval.furyPlusPlus)) return false;
                     var versions = new HashSet<string>(StringComparer.Ordinal);
                     foreach (var version in approval.vrcfury) {
-                        if (++count > 4096 || !IsReleaseVersion(version) || !versions.Add(version)) return false;
+                        if (++count > 4096 || !ReleaseVersion.IsStable(version) || !versions.Add(version)) return false;
                     }
                     pairs.Add(approval.furyPlusPlus, versions);
                 }
@@ -69,9 +69,5 @@ namespace FuryPlusPlus {
             }
         }
 
-        private static bool IsReleaseVersion(string value) {
-            return value != null && value.Length <= 32 && Version.TryParse(value, out var version)
-                   && version.Build >= 0 && version.Revision == -1 && version.ToString(3) == value;
-        }
     }
 }

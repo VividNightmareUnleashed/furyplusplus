@@ -5,9 +5,12 @@ over HTTPS. Each entry approves one exact FuryPlusPlus release with explicitly
 listed VRCFury releases. Approval does not replace the module's checks for its
 required methods and fields.
 
-The current catalog is deliberately empty: 1.2.5 still needs Unity tests and
-avatar bake validation. Publishing the catalog with no entries enables no
-optimizations. Do not copy example versions into the live list without testing.
+The prepared catalog approves FuryPlusPlus 1.2.5 with VRCFury 1.1427.0 after
+EditMode tests and avatar bake comparisons in Unity 2022.3.22f1 with SDK 3.10.4.
+All 129 EditMode tests passed. A representative avatar's speed-only bake matched
+stock for captured hierarchy, controller parameters, 600 clips and 30 skinned
+meshes. This does not establish complete animator playback or Android/client
+equivalence. The catalog must be published before clients can download this approval.
 
 ## Catalog format
 

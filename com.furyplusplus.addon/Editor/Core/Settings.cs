@@ -6,6 +6,18 @@ namespace FuryPlusPlus {
         internal const string MasterKey = KeyPrefix + "enabled";
         internal const string DetailedProfilingKey = KeyPrefix + "profiling.detailed";
         internal const string AutomaticCompatibilityChecksKey = KeyPrefix + "compatibility.automaticChecks";
+        internal const string AutomaticUpdateChecksKey = KeyPrefix + "updates.automaticChecks";
+
+        internal static bool? AutomaticUpdateChecks {
+            get {
+                return EditorPrefs.HasKey(AutomaticUpdateChecksKey)
+                    ? EditorPrefs.GetBool(AutomaticUpdateChecksKey) : (bool?)null;
+            }
+            set {
+                if (value.HasValue) EditorPrefs.SetBool(AutomaticUpdateChecksKey, value.Value);
+                else EditorPrefs.DeleteKey(AutomaticUpdateChecksKey);
+            }
+        }
 
         internal static bool? AutomaticCompatibilityChecks {
             get {

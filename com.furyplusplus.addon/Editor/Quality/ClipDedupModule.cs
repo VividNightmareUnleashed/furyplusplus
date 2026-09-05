@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Text;
 using HarmonyLib;
 using UnityEditor;
@@ -65,6 +67,13 @@ namespace FuryPlusPlus {
         [ThreadStatic] private static Dictionary<object, string> pendingHash;
         [ThreadStatic] private static int duplicates;
         [ThreadStatic] private static bool enabledForContext;
+        [ThreadStatic] private static Dictionary<object, int> additiveIds;
+
+        private sealed class ReferenceComparer : IEqualityComparer<object> {
+            internal static readonly ReferenceComparer Instance = new ReferenceComparer();
+            public new bool Equals(object left, object right) => ReferenceEquals(left, right);
+            public int GetHashCode(object value) => RuntimeHelpers.GetHashCode(value);
+        }
 
         internal static void Install(Harmony harmony) {
             ClipCurveCompat.DemandCore();
@@ -105,6 +114,8 @@ namespace FuryPlusPlus {
                         ? new Dictionary<string, Motion>(StringComparer.Ordinal)
                         : null;
                     pendingHash = enabledForContext ? new Dictionary<object, string>() : null;
+                    additiveIds = enabledForContext
+                        ? new Dictionary<object, int>(ReferenceComparer.Instance) : null;
                     duplicates = 0;
                 }
                 if (!enabledForContext) return true;
@@ -164,15 +175,18 @@ namespace FuryPlusPlus {
             }
 
             // The in-memory state Save writes over that base.
-            builder.Append("rate|").Append(ClipCurveCompat.ClipFrameRate.GetValue(clip)).Append('|')
+            builder.Append("rate|").Append(((float)ClipCurveCompat.ClipFrameRate.GetValue(clip))
+                    .ToString("R", CultureInfo.InvariantCulture)).Append('|')
                 .Append(ClipCurveCompat.ClipIsLooping.Invoke(clip, null)).Append('|')
-                .Append(ClipCurveCompat.ClipGetLengthInSeconds.Invoke(clip, null)).AppendLine();
+                .Append(((float)ClipCurveCompat.ClipGetLengthInSeconds.Invoke(clip, null))
+                    .ToString("R", CultureInfo.InvariantCulture)).AppendLine();
 
             // The additive reference pose is saved as its own asset and referenced by
             // settings, so only clips pointing at the same one may merge.
             var additive = ClipCurveCompat.ClipGetAdditiveRefPose.Invoke(clip, null);
+            if (additive != null && !additiveIds.ContainsKey(additive)) additiveIds[additive] = additiveIds.Count;
             builder.Append("additive|")
-                .Append(additive == null ? "<null>" : additive.GetHashCode().ToString()).AppendLine();
+                .Append(additive == null ? "<null>" : additiveIds[additive].ToString()).AppendLine();
 
             var entries = new List<(EditorCurveBinding Binding, object Curve)>();
             foreach (var entry in ClipCurveCompat.AllCurvesOf(clip)) {
