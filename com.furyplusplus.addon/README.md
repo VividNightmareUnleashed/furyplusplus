@@ -12,11 +12,24 @@ while QuickFury is installed, FuryPlusPlus disables
 QuickFury's patches each session and warns. Remove `com.quickfury.addon` (settings do not carry
 over).
 
-FuryPlusPlus 1.2.5 targets VRCFury 1.1427.0. Historical measurements with FuryPlusPlus 1.2.0
-and VRCFury 1.1382.0 reduced a reference-avatar bake from **about 33 seconds to 3.7 seconds**,
-with most remaining savings coming from Armature Link. These are not measurements of the
-current release; gains depend on the avatar and enabled modules. Version 1.2.5 passed 129 Unity
-EditMode tests and stock/optimized avatar bake comparisons with VRCFury 1.1427.0.
+FuryPlusPlus 1.3.0 targets **VRCFury 1.1427.0**. Pre-release testing reduced an avatar's Editor bake
+from **42.89 seconds to 13.91 seconds** — about **3.1× faster**, or **68% less time**.
+
+| Configuration | Editor bake time |
+| --- | ---: |
+| Stock VRCFury 1.1427.0 | 42.89 s |
+| FuryPlusPlus, speed optimizations only | 15.87 s |
+| FuryPlusPlus, full enabled configuration | 13.91 s |
+
+Measured on September 5, 2026 in Unity 2022.3.22f1 with VRChat SDK 3.10.4,
+using the same optimization code under the earlier 1.2.5 candidate version.
+These are individual preprocess runs on one avatar, not averages or upload times;
+results depend on the avatar, enabled modules and Editor cache state.
+
+All 129 Unity EditMode tests passed. Speed-only output matched stock for the captured
+hierarchy, controller parameters, 600 animation clips and 30 skinned meshes.
+The full configuration reduced referenced clips to 456; quality optimizations intentionally
+change output. These checks do not establish complete animator playback or client equivalence.
 
 ## Requirements and compatibility
 
@@ -43,8 +56,8 @@ working setup. On a first install, check approvals in FuryPlusPlus settings,
 then restart Unity or reload scripts after an approval is downloaded. Downloaded
 changes always wait for a script reload; they never change patches during a bake.
 The settings window shows the current decision and a **Check once on GitHub**
-button that does not enable automatic checks. The tested 1.2.5/1.1427.0 approval has
-been prepared locally and becomes available after the catalog is published.
+button that does not enable automatic checks. Each FuryPlusPlus release needs
+its own exact version-pair approval; approval of an earlier release does not carry over.
 
 ## Fury++ updates
 

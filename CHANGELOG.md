@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.5 — 2026-09-05
+## 1.3.0 — 2026-09-05
 
 Adds compatibility approvals for exact FuryPlusPlus/VRCFury release pairs. New VRCFury
 releases can be approved after testing without rebuilding FuryPlusPlus solely to change a pin.
@@ -26,8 +26,8 @@ releases can be approved after testing without rebuilding FuryPlusPlus solely to
   Downloaded changes apply after a script reload, never during a bake. Settings show the
   current decision and offer a manual approval check.
 - **VRCFury dependency range:** permits 1.1427.0 through later 1.x releases to be installed;
-  installation alone does not approve a combination. The prepared catalog approves
-  1.2.5 with VRCFury 1.1427.0 after Unity tests and avatar bake comparisons.
+  installation alone does not approve a combination. Each new FuryPlusPlus release
+  needs approval for the exact installed VRCFury version.
 - **Current feature documentation:** both READMEs now distinguish active optimizations from
   retired modules and label older performance measurements with their tested version.
 
