@@ -6,29 +6,32 @@ profiles VRCFury's bake, replaces measured hot paths with indexed implementation
 conservative post-build passes that shrink the baked result. It does not ship, fork, or modify
 VRCFury.
 
-FuryPlusPlus is the successor to **QuickFury** and includes ports of all 21 of its validated speed
-patches. The two cannot run together: while QuickFury is installed, FuryPlusPlus disables
+FuryPlusPlus is the successor to **QuickFury**. Its original speed patches have been adapted or
+retired as VRCFury incorporates equivalent optimizations. The two cannot run together:
+while QuickFury is installed, FuryPlusPlus disables
 QuickFury's patches each session and warns. Remove `com.quickfury.addon` (settings do not carry
 over).
 
-FuryPlusPlus 1.2.3 is tested against VRCFury 1.1416.0. On the reference avatar it reduced a warm
-VRCFury bake from **93.8 seconds (stock) to 11–12 seconds**, and its output-quality passes cut
-the avatar's synced parameter data from **444 to 177 bits**.
+FuryPlusPlus 1.2.5 targets VRCFury 1.1427.0. Historical measurements with FuryPlusPlus 1.2.0
+and VRCFury 1.1382.0 reduced a reference-avatar bake from **about 33 seconds to 3.7 seconds**,
+with most remaining savings coming from Armature Link. These are not measurements of the
+current release; gains depend on the avatar and enabled modules. Unity tests and bake validation
+for 1.2.5 are pending.
 
 ## Requirements and compatibility
 
 - Unity 2022.3
 - VRChat Avatars SDK 3.10.3 or newer
 - VRCFury installed separately
-- Behavior-changing modules: **VRCFury 1.1416.0 exactly**
+- Behavior-changing modules: **VRCFury 1.1427.0 exactly**
 
 FuryPlusPlus discovers VRCFury's internal Editor methods at load time. Profiling remains available
 whenever the profiling signatures match, but version-pinned modules are disabled unless the
-installed VRCFury version is exactly `1.1416.0`. Each module also checks its own target signatures
+installed VRCFury version is exactly `1.1427.0`. Each module also checks its own target signatures
 and stays disabled if they differ. This is deliberately fail-closed because VRCFury does not expose
 a public extension API for these bake internals.
 
-The package's VPM dependency pins VRCFury to the exact validated version, so the Creator
+The package's VPM dependency pins VRCFury to the exact targeted version, so the Creator
 Companion only installs and keeps the combination the version-pinned modules support — it will
 refuse to update VRCFury past the pin while FuryPlusPlus is installed. A from-disk install skips
 that resolution; any VRCFury version loads, and unsupported versions simply run with every
@@ -41,7 +44,7 @@ version-pinned module disabled.
    present, but the package should not stay installed.)
 3. Add the package through the Creator Companion or by hand — both methods below.
 4. Wait for the Editor to recompile. The Console should report
-   `[FuryPlusPlus] Ready: 29/29 modules installed for VRCFury 1.1416.0, 15 superseded`.
+   `[FuryPlusPlus] Ready: 29/29 modules installed for VRCFury 1.1427.0, 15 superseded`.
 
 ### Via the VRChat Creator Companion (recommended)
 
@@ -72,36 +75,26 @@ upgrades and rollback harder.
 
 Open the FuryPlusPlus window via **Tools > FuryPlusPlus > Settings…**. Every module has its own
 kill switch, grouped by category; settings are stored in Unity `EditorPrefs`, so they apply to the
-current Editor user rather than being serialized into the avatar. All measured, parity-checked
-modules default on; **Restore recommended** returns to that set, **Disable all optimizations**
+current Editor user rather than being serialized into the avatar. **Restore recommended** resets
+the module defaults; **Disable all optimizations**
 gives an immediate stock-VRCFury control run.
 
-### Build speed modules (output-identical, ported from QuickFury)
+### Active build speed modules
 
 - **Armature constraint / PhysBone / skin / destroy indexes**: replace Armature Link's thousands
   of whole-avatar scans with per-phase indexes.
-- **Fast Armature Link moves** and **Armature debug-component suppression**.
-- **Ordered path rewrite** (+ *skip empty deferred rewrites*): ordered prefix index with
-  chronological rewrite semantics preserved.
-- **Layer-to-tree layer index** and **controller parameter index**: O(1) lookups where VRCFury
-  scans arrays.
-- **Fast SaveAssets discovery**, **SaveAssets batching (Unity 2022)**, **consolidated asset
-  container**, **fast controller asset graph** (+ *deduplicate generated clips*), **blendshape
-  binding cache**.
+- **Armature debug-component suppression**: avoids creating diagnostic components on merged
+  bones during preview builds; upload output is unchanged.
 - **Covered SPS mesh probe skip** and **SPS material probe cache**.
-- **Tracking behaviour index** and **behaviour container filter**.
-- Two conservative SaveAssets scan-skips remain experimental and default off.
-
-### Additional build speed modules
-
-- **Layer-to-tree binding index**, **compressor memoization**, **GetLayers cache**, **Full
-  Controller merge path memo**, and a **motion-graph traversal cache** (shadow-validated):
-  further measured hot-path replacements beyond the QuickFury ports.
+- **Compressor memoization**: reuses repeated parameter and menu queries within a bake.
 - **Fast blendshape optimizer bake**: one-pass rewrite of Blendshape Optimizer's bake step, with
   a default-on fix for VRCFury's multi-frame interpolation frame selection (stock behavior
   selectable per sub-toggle).
 - **Play-mode pass skipping**: passes that only matter for uploads (mipmap streaming fix, menu
   icon textures, final validation) are skipped during play-mode test builds.
+
+Fifteen older speed modules are retired because VRCFury now handles their work natively.
+Their settings remain visible, struck through and linked to the upstream replacement.
 
 ### Output quality modules (change bake output)
 

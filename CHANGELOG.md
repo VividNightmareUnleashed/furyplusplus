@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.5 — 2026-09-05
+
+Tracks VRCFury 1.1427. Its SDK 3.10.5 workaround guards and animator-preview helper move
+leave the avatar build services and FuryPlusPlus patch targets unchanged.
+
+- **VRCFury pin → 1.1427.0:** the package dependency and runtime compatibility guard advance
+  together from 1.1426.0. No patch-body changes or additional module retirements were needed.
+- **Current feature documentation:** both READMEs now distinguish active optimizations from
+  retired modules and label older performance measurements with their tested version.
+
 ## 1.2.4 — 2026-08-24
 
 Tracks VRCFury 1.1426 and tightens FuryPlusPlus's compatibility boundaries. VRCFury 1.1417-1.1426
