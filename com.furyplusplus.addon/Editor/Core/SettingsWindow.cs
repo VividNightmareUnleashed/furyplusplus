@@ -59,7 +59,7 @@ namespace FuryPlusPlus {
             new TabDef {
                 Kind = ModuleKind.Pass, Title = "Passes",
                 Note = "Standalone SDK preprocessor passes that run on the finished avatar — " +
-                       "version-pinned like everything else.",
+                       "requires an approved release combination.",
                 GroupOrder = new[] { "Synced parameters" },
             },
             new TabDef {
@@ -163,6 +163,14 @@ namespace FuryPlusPlus {
                 "Bake times vary with editor state — compare benchmark and normal bakes " +
                 "back-to-back on the same avatar."
             );
+        }
+
+        private string lastApprovalStatus;
+
+        private void OnInspectorUpdate() {
+            if (lastApprovalStatus == CompatibilityApprovals.Status) return;
+            lastApprovalStatus = CompatibilityApprovals.Status;
+            Repaint();
         }
 
         private void OnGUI() {
@@ -691,25 +699,39 @@ namespace FuryPlusPlus {
         private static void DrawStatusBanner() {
             var compat = Bootstrap.Compat;
             if (compat != null) {
-                if (compat.IsExactVersion) {
+                if (compat.IsApproved) {
                     EditorGUILayout.HelpBox(
-                        $"Full compatibility: VRCFury {compat.PackageVersion}.",
+                        $"Approved combination: FuryPlusPlus {PackageIdentity.Version} with VRCFury {compat.PackageVersion}. " +
+                        "Each module also checks its required methods and fields.",
                         MessageType.Info
                     );
                 } else {
                     EditorGUILayout.HelpBox(
-                        "UNSUPPORTED VRCFURY VERSION — ALL FEATURES DISABLED.\n" +
-                        $"VRCFury {compat.PackageVersion} detected, but this build is validated only " +
-                        $"against {VrcfuryCompat.PinnedVersion}. Avatars bake with stock VRCFury; only " +
-                        "the bake profiler and editor visuals stay active. Install VRCFury " +
-                        $"{VrcfuryCompat.PinnedVersion} or update FuryPlusPlus.",
-                        MessageType.Error
+                        $"FuryPlusPlus {PackageIdentity.Version} with VRCFury {compat.PackageVersion} " +
+                        "has no current approval. Optimizations are disabled; avatars bake with stock VRCFury. " +
+                        "Profiling and editor visuals remain eligible.",
+                        MessageType.Warning
                     );
                 }
             } else if (Bootstrap.DisabledReason != null) {
                 EditorGUILayout.HelpBox("FuryPlusPlus inactive: " + Bootstrap.DisabledReason, MessageType.Warning);
             } else {
                 EditorGUILayout.HelpBox("FuryPlusPlus has not initialized yet.", MessageType.None);
+            }
+            EditorGUILayout.HelpBox(CompatibilityApprovals.Status, MessageType.None);
+            var automaticChecks = Settings.AutomaticCompatibilityChecks == true;
+            var enableChecks = EditorGUILayout.ToggleLeft(
+                new GUIContent("Automatically check compatibility on GitHub",
+                    "Download the developer's manually tested approval list when Unity starts and after scripts reload. "
+                    + "GitHub receives your IP address, but no avatar data or installed version information. "
+                    + "This choice applies to your Unity projects on this computer."), automaticChecks);
+            if (enableChecks != automaticChecks) CompatibilityApprovals.SetAutomaticChecks(enableChecks);
+            EditorGUILayout.LabelField(
+                "Automatic checks " + (enableChecks ? "on" : "off")
+                + ". Cached approvals remain usable for 30 days. A one-time check does not change this choice.",
+                EditorStyles.wordWrappedMiniLabel);
+            using (new EditorGUI.DisabledScope(CompatibilityApprovals.IsChecking)) {
+                if (GUILayout.Button("Check once on GitHub")) CompatibilityApprovals.CheckNow();
             }
         }
 

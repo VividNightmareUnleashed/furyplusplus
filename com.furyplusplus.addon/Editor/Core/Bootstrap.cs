@@ -41,6 +41,7 @@ namespace FuryPlusPlus {
 
             // Before the compat gate: the first-open welcome must appear even when VRCFury
             // is missing or unsupported — that window's banner is what explains the problem.
+            CompatibilityApprovals.Initialize();
             MaybeShowWelcome();
 
             if (!VrcfuryCompat.TryCreate(out var compat, out var error)) {
@@ -54,15 +55,17 @@ namespace FuryPlusPlus {
             }
 
             Compat = compat;
-            try {
-                // Before modules install: their Install() calls RegisterBefore/After.
-                BuildPhaseHooks.Install(Harmony, compat);
-            } catch (Exception e) {
-                Log.Warn("Build phase hooks unavailable (dependent modules will fail closed): " + e.Message);
+            if (compat.IsApproved) {
+                try {
+                    // Before modules install: their Install() calls RegisterBefore/After.
+                    BuildPhaseHooks.Install(Harmony, compat);
+                } catch (Exception e) {
+                    Log.Warn("Build phase hooks unavailable (dependent modules will fail closed): " + e.Message);
+                }
             }
             ModuleRegistry.InstallAll(Harmony, compat);
 
-            if (!compat.IsExactVersion) WarnUnsupportedVersion(compat.PackageVersion);
+            if (!compat.IsApproved) WarnUnsupportedVersion(compat.PackageVersion);
         }
 
         /**
@@ -90,27 +93,25 @@ namespace FuryPlusPlus {
         }
 
         /**
-         * Untested VRCFury means every version-pinned module failed closed — the addon is
+         * An unapproved combination means every version-gated module failed closed — the addon is
          * effectively off. A console line is too easy to miss for that, so this is a modal
          * dialog, once per editor session (same policy as the QuickFury coexistence dialog).
          */
         private static void WarnUnsupportedVersion(string vrcfuryVersion) {
             Log.Warn(
-                $"VRCFury {vrcfuryVersion} is untested (validated against " +
-                $"{VrcfuryCompat.PinnedVersion}); all optimizations are disabled."
+                $"FuryPlusPlus {PackageIdentity.Version} with VRCFury {vrcfuryVersion} " +
+                "has no current approval; optimizations are disabled."
             );
             if (SessionState.GetBool(UnsupportedDialogShownKey, false)) return;
             SessionState.SetBool(UnsupportedDialogShownKey, true);
             EditorApplication.delayCall += () => {
                 if (EditorUtility.DisplayDialog(
-                        "FuryPlusPlus — ALL FEATURES DISABLED",
-                        $"This project has VRCFury {vrcfuryVersion}, but this FuryPlusPlus build is " +
-                        $"validated only against VRCFury {VrcfuryCompat.PinnedVersion}.\n\n" +
-                        "Every optimization is version-pinned and fails closed on an untested " +
-                        "VRCFury, so ALL FEATURES ARE DISABLED. Avatars bake with stock VRCFury; " +
-                        "only the bake profiler and editor visuals stay active.\n\n" +
-                        $"Install VRCFury {VrcfuryCompat.PinnedVersion} or update FuryPlusPlus to " +
-                        "re-enable the optimizations.",
+                        "FuryPlusPlus — optimizations disabled",
+                        $"FuryPlusPlus {PackageIdentity.Version} with VRCFury {vrcfuryVersion} " +
+                        "has no current approval in this Editor session.\n\n" +
+                        "Avatars bake with stock VRCFury; profiling and editor visuals remain eligible. " +
+                        "Check approvals in FuryPlusPlus settings. If an approval is downloaded, " +
+                        "restart Unity or reload scripts to apply it.",
                         "Open FuryPlusPlus", "Close")) {
                     SettingsWindow.Open();
                 }

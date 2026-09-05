@@ -22,20 +22,28 @@ for 1.2.5 are pending.
 
 - Unity 2022.3
 - VRChat Avatars SDK 3.10.3 or newer
-- VRCFury installed separately
-- Behavior-changing modules: **VRCFury 1.1427.0 exactly**
+- VRCFury 1.1427.0 or newer within 1.x, installed separately
+- An approved combination of the exact FuryPlusPlus and VRCFury versions
 
-FuryPlusPlus discovers VRCFury's internal Editor methods at load time. Profiling remains available
-whenever the profiling signatures match, but version-pinned modules are disabled unless the
-installed VRCFury version is exactly `1.1427.0`. Each module also checks its own target signatures
-and stays disabled if they differ. This is deliberately fail-closed because VRCFury does not expose
-a public extension API for these bake internals.
+FuryPlusPlus checks a public approval list on GitHub. New VRCFury versions can
+be approved for an existing FuryPlusPlus release after review and testing,
+without requiring another package release just to update a version pin.
+Each module still checks its required methods and fields when it installs.
 
-The package's VPM dependency pins VRCFury to the exact targeted version, so the Creator
-Companion only installs and keeps the combination the version-pinned modules support — it will
-refuse to update VRCFury past the pin while FuryPlusPlus is installed. A from-disk install skips
-that resolution; any VRCFury version loads, and unsupported versions simply run with every
-version-pinned module disabled.
+Unknown combinations run stock VRCFury with optimization modules disabled;
+profiling and editor visuals remain eligible. The package's VPM dependency range
+allows newer VRCFury versions to be installed, but does not approve them.
+
+FuryPlusPlus asks permission before checking GitHub automatically at Editor startup
+and after script reloads. You can decline or change your choice in settings. No avatar
+data or installed version information is sent; GitHub receives a normal web request,
+including your IP address. A cached list remains usable
+for 30 days, so temporary connection failures do not immediately disable a
+working setup. On a first install, check approvals in FuryPlusPlus settings,
+then restart Unity or reload scripts after an approval is downloaded. Downloaded
+changes always wait for a script reload; they never change patches during a bake.
+The settings window shows the current decision and a **Check once on GitHub**
+button that does not enable automatic checks. The initial 1.2.5 approval remains pending Unity validation.
 
 ## Install
 
@@ -43,7 +51,7 @@ version-pinned module disabled.
 2. If QuickFury is installed, remove it. (FuryPlusPlus suppresses QuickFury's patches while it is
    present, but the package should not stay installed.)
 3. Add the package through the Creator Companion or by hand — both methods below.
-4. Wait for the Editor to recompile. The Console should report
+4. Check that the installed combination is approved in FuryPlusPlus settings. Once approved and reloaded, the Console should report
    `[FuryPlusPlus] Ready: 29/29 modules installed for VRCFury 1.1427.0, 15 superseded`.
 
 ### Via the VRChat Creator Companion (recommended)
@@ -143,6 +151,6 @@ occur only with FuryPlusPlus installed belong in the FuryPlusPlus issue tracker.
 provided without warranty and is used at your own risk.**
 
 Treat any VRCFury upgrade as unsupported until FuryPlusPlus is re-profiled and revalidated against
-that exact release. Unknown versions retain profiling but fail closed for every version-pinned
+that exact release. Unapproved combinations retain profiling but fail closed for every version-gated
 module. See [NOTICE.md](NOTICE.md) for the VRCFury commercial-license considerations that apply to
 all VRCFury-patching tools.

@@ -117,7 +117,7 @@ namespace FuryPlusPlus.Tests.Editor {
             foreach (var module in ModuleRegistry.All) {
                 if (module.Kind == ModuleKind.Quality) {
                     Assert.That(module.RequiredTier, Is.EqualTo(CompatTier.ExactVersion),
-                        $"{module.Id}: Quality modules change VRCFury's output and must be version-pinned");
+                        $"{module.Id}: Quality modules change VRCFury's output and require an approved exact release pair");
                 }
             }
         }

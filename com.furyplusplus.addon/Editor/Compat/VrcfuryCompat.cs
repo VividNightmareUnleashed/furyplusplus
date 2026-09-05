@@ -10,7 +10,6 @@ namespace FuryPlusPlus {
      * lookups live in lazy area holders (ArmatureCompat, ...), resolved on first module use.
      */
     internal sealed class VrcfuryCompat {
-        internal const string PinnedVersion = "1.1427.0";
         internal const string AvatarsEditorAssemblyName = "VRCFury-Editor-Avatars";
 
         internal string PackageVersion { get; private set; }
@@ -23,7 +22,7 @@ namespace FuryPlusPlus {
         internal MethodInfo ActionGetName { get; private set; }
         internal MethodInfo ActionGetService { get; private set; }
 
-        internal bool IsExactVersion => PackageVersion == PinnedVersion;
+        internal bool IsApproved { get; private set; }
 
         internal bool Satisfies(CompatTier tier) {
             switch (tier) {
@@ -32,7 +31,7 @@ namespace FuryPlusPlus {
                 case CompatTier.PublicSdk:
                     return true;
                 case CompatTier.ExactVersion:
-                    return IsExactVersion;
+                    return IsApproved;
                 default:
                     return false;
             }
@@ -65,6 +64,7 @@ namespace FuryPlusPlus {
                 output.AvatarsEditorAssembly = avatarsAssembly;
                 output.PackageVersion = PackageInfo.FindForAssembly(avatarsAssembly)?.version ?? "unknown";
                 output.ModuleVersionId = avatarsAssembly.ManifestModule.ModuleVersionId;
+                output.IsApproved = CompatibilityApprovals.IsApproved(PackageIdentity.Version, output.PackageVersion);
 
                 var builderType = avatarsAssembly.GetType("VF.Builder.VRCFuryBuilder", false);
                 output.RunMain = ReflectionUtils.FindUniqueMethod(

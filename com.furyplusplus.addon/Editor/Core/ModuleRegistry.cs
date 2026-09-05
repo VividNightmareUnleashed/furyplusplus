@@ -97,7 +97,7 @@ namespace FuryPlusPlus {
                 }
                 if (!compat.Satisfies(module.RequiredTier)) {
                     Set(module, ModuleState.DisabledIncompatible,
-                        $"requires {module.RequiredTier} (VRCFury {compat.PackageVersion}, tested {VrcfuryCompat.PinnedVersion})");
+                        $"requires an approved combination (FuryPlusPlus {PackageIdentity.Version}, VRCFury {compat.PackageVersion})");
                     continue;
                 }
                 try {

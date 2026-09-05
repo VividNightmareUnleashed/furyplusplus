@@ -112,9 +112,9 @@ namespace FuryPlusPlus {
                 } else if (compat == null) {
                     text = "FuryPlusPlus inactive: " + (Bootstrap.DisabledReason ?? "not initialized");
                     warn = true;
-                } else if (!compat.IsExactVersion) {
-                    text = $"FuryPlusPlus: VRCFury {compat.PackageVersion} detected — tested with " +
-                           $"{VrcfuryCompat.PinnedVersion}. Optimizations disabled (profiling only).";
+                } else if (!compat.IsApproved) {
+                    text = $"FuryPlusPlus {PackageIdentity.Version} with VRCFury {compat.PackageVersion}: " +
+                           "combination not approved. Optimizations disabled (profiling only).";
                     warn = true;
                 } else {
                     activeCountSnapshot = ModuleRegistry.All.Count(ModuleRegistry.IsOn);

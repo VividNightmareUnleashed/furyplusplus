@@ -2,11 +2,19 @@
 
 ## 1.2.5 — 2026-09-05
 
-Tracks VRCFury 1.1427. Its SDK 3.10.5 workaround guards and animator-preview helper move
-leave the avatar build services and FuryPlusPlus patch targets unchanged.
+Adds compatibility approvals for exact FuryPlusPlus/VRCFury release pairs. New VRCFury
+releases can be approved after testing without rebuilding FuryPlusPlus solely to change a pin.
 
-- **VRCFury pin → 1.1427.0:** the package dependency and runtime compatibility guard advance
-  together from 1.1426.0. No patch-body changes or additional module retirements were needed.
+- **GitHub approval list:** unknown combinations keep optimizations disabled. Each approved
+  module still checks its required methods and fields when it installs.
+- **Optional automatic checks:** a one-time prompt asks permission and explains what is
+  sent to GitHub. Settings remember the choice and offer a separate one-time check.
+- **Cached decisions:** background checks update a project-local cache, valid for 30 days.
+  Downloaded changes apply after a script reload, never during a bake. Settings show the
+  current decision and offer a manual approval check.
+- **VRCFury dependency range:** permits 1.1427.0 through later 1.x releases to be installed;
+  installation alone does not approve a combination. The initial catalog is empty pending
+  Unity validation of 1.2.5.
 - **Current feature documentation:** both READMEs now distinguish active optimizations from
   retired modules and label older performance measurements with their tested version.
 

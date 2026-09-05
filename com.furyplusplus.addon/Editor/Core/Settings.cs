@@ -5,6 +5,18 @@ namespace FuryPlusPlus {
         internal const string KeyPrefix = "com.furyplusplus.";
         internal const string MasterKey = KeyPrefix + "enabled";
         internal const string DetailedProfilingKey = KeyPrefix + "profiling.detailed";
+        internal const string AutomaticCompatibilityChecksKey = KeyPrefix + "compatibility.automaticChecks";
+
+        internal static bool? AutomaticCompatibilityChecks {
+            get {
+                return EditorPrefs.HasKey(AutomaticCompatibilityChecksKey)
+                    ? EditorPrefs.GetBool(AutomaticCompatibilityChecksKey) : (bool?)null;
+            }
+            set {
+                if (value.HasValue) EditorPrefs.SetBool(AutomaticCompatibilityChecksKey, value.Value);
+                else EditorPrefs.DeleteKey(AutomaticCompatibilityChecksKey);
+            }
+        }
 
         // Cached so hot phase-boundary checks never hit EditorPrefs; refreshed on every write.
         private static bool? masterCache;

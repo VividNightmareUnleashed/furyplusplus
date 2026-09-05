@@ -20,7 +20,7 @@ namespace FuryPlusPlus {
         Profiling,
         /** Depends only on public VRC SDK types; active even on unknown VRCFury versions. */
         PublicSdk,
-        /** Reflection/Harmony on VRCFury internals; pinned to VrcfuryCompat.PinnedVersion, fail-closed. */
+        /** Reflection/Harmony on VRCFury internals; requires an approved exact release pair. */
         ExactVersion
     }
 
