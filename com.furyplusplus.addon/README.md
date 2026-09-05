@@ -1,7 +1,7 @@
 # FuryPlusPlus
 
 FuryPlusPlus is an Editor-only, bolt-on layer for an existing VRCFury installation, covering both
-**bake speed** and **output quality** — fewer animator layers, fewer synced parameter bits. It
+**bake speed** and **output quality**: fewer animator layers, fewer synced parameter bits. It
 profiles VRCFury's bake, replaces measured hot paths with indexed implementations, and adds
 conservative post-build passes that shrink the baked result. It does not ship, fork, or modify
 VRCFury.
@@ -13,7 +13,7 @@ QuickFury's patches each session and warns. Remove `com.quickfury.addon` (settin
 over).
 
 FuryPlusPlus 1.3.0 targets **VRCFury 1.1427.0**. Pre-release testing reduced an avatar's Editor bake
-from **42.89 seconds to 13.91 seconds** — about **3.1× faster**, or **68% less time**.
+from **42.89 seconds to 13.91 seconds**. That's about **3.1× faster**, or **68% less time**.
 
 | Configuration | Editor bake time |
 | --- | ---: |
@@ -78,7 +78,7 @@ VRCFury and the VRChat SDK are not updated. See the
 1. Install VRCFury normally and confirm the avatar builds without FuryPlusPlus.
 2. If QuickFury is installed, remove it. (FuryPlusPlus suppresses QuickFury's patches while it is
    present, but the package should not stay installed.)
-3. Add the package through the Creator Companion or by hand — both methods below.
+3. Add the package through the Creator Companion or by hand. Both methods are described below.
 4. Check that the installed combination is approved in FuryPlusPlus settings. Once approved and reloaded, the Console should report
    `[FuryPlusPlus] Ready: 30/30 modules installed for VRCFury 1.1427.0, 15 superseded`.
 
