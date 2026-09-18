@@ -12,6 +12,14 @@ earlier 1.2.5 candidate: hierarchy, controller parameters, 456 clips and 30 skin
 meshes. This does not establish complete animator playback or Android/client
 equivalence. The catalog must be published before clients can download this approval.
 
+VRCFury 1.1428.0 and 1.1429.0 are approved with the same FuryPlusPlus release. The
+three upstream code changes between 1.1427.0 and 1.1429.0 alter `PlayModeTrigger`,
+the SDK too-many-parameters hook and the SPS `sps_id` shader. None moves a member any
+module binds, and `CompressorMenuItem.Get()` keeps its signature. `PlayModeTrigger` no
+longer skips avatars that carry no VRCFury components, so in play mode every avatar
+now reaches `VRCBuildPipelineCallbacks.OnPreprocessAvatar`, the method the bake-chain
+anchor patches.
+
 ## Catalog format
 
 This is an example, not an approval:
