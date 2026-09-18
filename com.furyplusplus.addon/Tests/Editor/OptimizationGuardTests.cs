@@ -78,6 +78,38 @@ namespace FuryPlusPlus.Tests.Editor {
             }
         }
 
+        [TestCase(false, false)]
+        [TestCase(true, true)]
+        public void EndOfBuildHooksFlushOnlyWhenVrcfuryRanActions(bool actionRan, bool expected) {
+            var module = ModuleRegistry.Find("noOpCurveStrip");
+            if (!ModuleRegistry.IsActive(module)) Assert.Ignore("Requires an approved VRCFury pair.");
+            var oldMaster = Settings.MasterEnabled;
+            var had = EditorPrefs.HasKey(module.PrefKey);
+            var previous = EditorPrefs.GetBool(module.PrefKey);
+            var registered = new List<BuildPhaseHooks.Hook>(BuildPhaseHooks.Hooks);
+            try {
+                Settings.MasterEnabled = true;
+                Settings.SetModuleEnabled(module, true);
+                var called = false;
+                BuildPhaseHooks.Hooks.Clear();
+                BuildPhaseHooks.Hooks.Add(new BuildPhaseHooks.Hook {
+                    ModuleId = module.Id, After = true, Callback = _ => called = true
+                });
+                BuildPhaseHooks.RunPrefix(null);
+                // An unrecognized action fails priority lookup, which dispatch tolerates.
+                if (actionRan) BuildPhaseHooks.CallPrefix(new object());
+                BuildPhaseHooks.RunFinalizer(null);
+                Assert.That(called, Is.EqualTo(expected));
+            } finally {
+                BuildPhaseHooks.RunFinalizer(null);
+                BuildPhaseHooks.Hooks.Clear();
+                BuildPhaseHooks.Hooks.AddRange(registered);
+                Settings.MasterEnabled = oldMaster;
+                if (had) EditorPrefs.SetBool(module.PrefKey, previous);
+                else EditorPrefs.DeleteKey(module.PrefKey);
+            }
+        }
+
         [Test]
         public void LayerMergeKeepsInterveningOverridesAndRejectsOverlappingDonors() {
             var bindings = new[] {
