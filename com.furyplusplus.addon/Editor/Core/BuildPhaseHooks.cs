@@ -24,9 +24,12 @@ namespace FuryPlusPlus {
             internal bool Broken;
         }
 
-        private static readonly List<Hook> Hooks = new List<Hook>();
+        internal static readonly List<Hook> Hooks = new List<Hook>();
         private static bool installed;
         private static bool runActive;
+        // VRCFury returns from Run without executing any action when the avatar has no
+        // VRCFury components; end-of-build hooks must not fire for a build that never ran.
+        private static bool actionsRan;
         private static UnityEngine.GameObject currentAvatarRoot;
 
         internal static bool Installed => installed;
@@ -96,7 +99,7 @@ namespace FuryPlusPlus {
             });
         }
 
-        private static void RunPrefix(object __0) {
+        internal static void RunPrefix(object __0) {
             foreach (var hook in Hooks) {
                 hook.Fired = false;
                 hook.Broken = false;
@@ -106,11 +109,14 @@ namespace FuryPlusPlus {
             } catch {
                 currentAvatarRoot = null;
             }
+            actionsRan = false;
             runActive = true;
         }
 
-        private static void CallPrefix(object __instance) {
-            if (!runActive || Hooks.Count == 0) return;
+        internal static void CallPrefix(object __instance) {
+            if (!runActive) return;
+            actionsRan = true;
+            if (Hooks.Count == 0) return;
 
             // The ~7 hooks each fire at most once per build; skip the reflection invokes
             // for every action after the last one has fired.
@@ -148,13 +154,14 @@ namespace FuryPlusPlus {
             }
         }
 
-        private static Exception RunFinalizer(Exception __exception) {
+        internal static Exception RunFinalizer(Exception __exception) {
             if (!runActive) return __exception;
 
-            if (__exception == null) {
+            if (__exception == null && actionsRan) {
                 // Phases at the very end of the build have no later action; flush their
                 // "after" hooks now — BEFORE clearing run state, so GetService and
-                // CurrentAvatarRoot still work inside them. Skipped when the build failed.
+                // CurrentAvatarRoot still work inside them. Skipped when the build failed
+                // or VRCFury skipped the avatar without running any action.
                 foreach (var hook in Hooks) {
                     if (hook.Fired || hook.Broken || !hook.After) continue;
                     hook.Fired = true;
@@ -162,6 +169,7 @@ namespace FuryPlusPlus {
                 }
             }
             runActive = false;
+            actionsRan = false;
             currentAvatarRoot = null;
             return __exception;
         }
