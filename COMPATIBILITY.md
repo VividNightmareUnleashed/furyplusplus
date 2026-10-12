@@ -32,8 +32,15 @@ matched in hierarchy, skinned meshes, controllers, expression parameters and all
 clips. Preprocessing took about 83 to 85 seconds stock and 45 seconds with FuryPlusPlus.
 The full configuration differed only as its quality passes intend: two unused synced
 parameters lost sync (16 bits), duplicate clips were merged and 8 no-op curves were
-removed. VRCFury 1.1430.0 through 1.1433.0 were not tested individually and remain
-unapproved.
+removed.
+
+VRCFury 1.1430.0 through 1.1433.0 are approved with FuryPlusPlus 1.3.0 after the same
+tests, run separately against each release on October 12, 2026: all 30 modules
+installed, all 129 EditMode tests passed, stock and speed-only bakes matched, and the
+full configuration differed only by its intended quality passes. Each release contains
+a subset of the upstream changes listed for 1.1434.0. VRCFury occasionally adds a
+numeric suffix when two generated objects draw the same random name, including in stock
+bakes; comparisons ignore that suffix.
 
 ## Catalog format
 
