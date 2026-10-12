@@ -20,6 +20,21 @@ longer skips avatars that carry no VRCFury components, so in play mode every ava
 now reaches `VRCBuildPipelineCallbacks.OnPreprocessAvatar`, the method the bake-chain
 anchor patches.
 
+VRCFury 1.1434.0 is approved with FuryPlusPlus 1.3.0, tested on October 12, 2026 with
+Unity 2022.3.22f1, VRChat SDK 3.10.5 and the published 1.3.0 package. Between 1.1429.0
+and 1.1434.0, upstream split the SDK 3.10.5 define into per-fix defines with the same
+threshold, made `HarmonyUtils.MethodOrLookup` null-safe, changed how `SpsPatcher`
+patches shader passes (per SubShader, skipping URP SubShaders and code blocks), redrew
+the component header triangles and changed world-only code. No changed file contains a
+member any module binds or patches. All 30 eligible modules installed and all 129
+EditMode tests passed. On a 52-component test avatar, the stock and speed-only bakes
+matched in hierarchy, skinned meshes, controllers, expression parameters and all 199
+clips. Preprocessing took about 83 to 85 seconds stock and 45 seconds with FuryPlusPlus.
+The full configuration differed only as its quality passes intend: two unused synced
+parameters lost sync (16 bits), duplicate clips were merged and 8 no-op curves were
+removed. VRCFury 1.1430.0 through 1.1433.0 were not tested individually and remain
+unapproved.
+
 ## Catalog format
 
 This is an example, not an approval:
