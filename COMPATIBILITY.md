@@ -86,6 +86,17 @@ restoration and reload scripts before running installation and bake checks.
 This enables the candidate only in that test project; it is not a public
 approval. Do not publish the catalog merely to make the validation run possible.
 
+Give the candidate a revision higher than the published one. Otherwise the next
+automatic check replaces it with the downloaded list. A running Editor can still
+overwrite the seeded cache: its automatic check compares the download with the list
+it loaded at startup, not with the file, and then saves the download over the cache.
+A check delayed by a modal dialog (such as the unapproved-version warning) runs when
+the dialog closes. Seed the cache immediately before the script reload, after
+any pending check has finished, and seed it again if the reload is delayed. Install
+the candidate VRCFury release before that reload, so that no reload runs against an
+unapproved pair. After the reload, confirm that the cache still holds the candidate
+revision and that the compatibility status reports the downloaded list as older.
+
 ## Client behavior
 
 - The client requests one fixed public URL. It sends no avatar data or version
