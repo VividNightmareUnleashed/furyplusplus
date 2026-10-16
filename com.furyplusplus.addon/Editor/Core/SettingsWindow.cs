@@ -708,10 +708,20 @@ namespace FuryPlusPlus {
                         "Each module also checks its required methods and fields.",
                         MessageType.Info
                     );
+                } else if (CompatibilityApprovals.IsApprovedAfterReload(PackageIdentity.Version, compat.PackageVersion)) {
+                    EditorGUILayout.HelpBox(
+                        $"FuryPlusPlus {PackageIdentity.Version} with VRCFury {compat.PackageVersion} is approved. " +
+                        "Optimizations turn on when Unity reloads scripts; until then, avatars bake with stock VRCFury.",
+                        MessageType.Info
+                    );
+                    if (GUILayout.Button("Reload scripts")) EditorUtility.RequestScriptReload();
                 } else {
                     EditorGUILayout.HelpBox(
                         $"FuryPlusPlus {PackageIdentity.Version} with VRCFury {compat.PackageVersion} " +
-                        "has no current approval. Optimizations are disabled; avatars bake with stock VRCFury. " +
+                        (CompatibilityApprovals.StartupCheckSettled
+                            ? "has not been approved yet. Optimizations are disabled; avatars bake with stock VRCFury. "
+                            : "is not approved in the saved list. Checking GitHub for a newer list; "
+                              + "until one applies, avatars bake with stock VRCFury. ") +
                         "Profiling and editor visuals remain eligible.",
                         MessageType.Warning
                     );

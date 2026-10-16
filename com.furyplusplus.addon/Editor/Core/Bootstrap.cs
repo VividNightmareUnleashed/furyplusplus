@@ -10,6 +10,7 @@ namespace FuryPlusPlus {
         internal const string HarmonyId = "com.furyplusplus.optimizer";
 
         private const string UnsupportedDialogShownKey = "FuryPlusPlus.UnsupportedDialogShown";
+        private const string ReloadOfferedRevisionKey = "FuryPlusPlus.ApprovalReloadOffered";
 
         private static readonly Harmony Harmony = new Harmony(HarmonyId);
 
@@ -18,8 +19,12 @@ namespace FuryPlusPlus {
         /** Human-readable reason the addon is (fully) inactive, for the settings/welcome UI. */
         internal static string DisabledReason { get; private set; }
 
+        /** VRCFury version this domain left unoptimized for lack of approval; null otherwise. */
+        private static string unapprovedVersion;
+
         static Bootstrap() {
             AssemblyReloadEvents.beforeAssemblyReload += Unpatch;
+            CompatibilityApprovals.CheckFinished += () => EditorApplication.delayCall += ExplainApproval;
             EditorApplication.delayCall += Initialize;
         }
 
@@ -31,6 +36,7 @@ namespace FuryPlusPlus {
             Unpatch();
             Compat = null;
             DisabledReason = null;
+            unapprovedVersion = null;
 
             Coexistence.SuppressQuickFury(Harmony);
             if (!Settings.MasterEnabled) {
@@ -94,28 +100,71 @@ namespace FuryPlusPlus {
 
         /**
          * An unapproved combination means every version-gated module failed closed — the addon is
-         * effectively off. A console line is too easy to miss for that, so this is a modal
+         * effectively off. A console line is too easy to miss for that, so this gets a modal
          * dialog, once per editor session (same policy as the QuickFury coexistence dialog).
+         * The dialog waits for the startup approval check: on a project without cached approvals
+         * that check usually downloads the approval moments later, and "disabled" would mislead.
          */
         private static void WarnUnsupportedVersion(string vrcfuryVersion) {
             Log.Warn(
                 $"FuryPlusPlus {PackageIdentity.Version} with VRCFury {vrcfuryVersion} " +
                 "has no current approval; optimizations are disabled."
             );
+            unapprovedVersion = vrcfuryVersion;
+            // Otherwise CheckFinished calls ExplainApproval when the startup check settles.
+            if (CompatibilityApprovals.StartupCheckSettled) EditorApplication.delayCall += ExplainApproval;
+        }
+
+        private static void ExplainApproval() {
+            var vrcfuryVersion = unapprovedVersion;
+            if (vrcfuryVersion == null || !CompatibilityApprovals.StartupCheckSettled) return;
+            // Compat is null when VRCFury's profiling members are missing; a reload would not help.
+            if (Compat != null
+                && CompatibilityApprovals.IsApprovedAfterReload(PackageIdentity.Version, vrcfuryVersion)) {
+                OfferReload(vrcfuryVersion);
+                return;
+            }
             if (SessionState.GetBool(UnsupportedDialogShownKey, false)) return;
             SessionState.SetBool(UnsupportedDialogShownKey, true);
-            EditorApplication.delayCall += () => {
-                if (EditorUtility.DisplayDialog(
-                        "FuryPlusPlus — optimizations disabled",
-                        $"FuryPlusPlus {PackageIdentity.Version} with VRCFury {vrcfuryVersion} " +
-                        "has no current approval in this Editor session.\n\n" +
-                        "Avatars bake with stock VRCFury; profiling and editor visuals remain eligible. " +
-                        "Check approvals in FuryPlusPlus settings. If an approval is downloaded, " +
-                        "restart Unity or reload scripts to apply it.",
-                        "Open FuryPlusPlus", "Close")) {
-                    SettingsWindow.Open();
-                }
-            };
+            if (EditorUtility.DisplayDialog(
+                    "FuryPlusPlus: optimizations disabled",
+                    $"FuryPlusPlus {PackageIdentity.Version} with VRCFury {vrcfuryVersion} " +
+                    "has not been approved yet.\n\n" +
+                    "Avatars bake with stock VRCFury; profiling and editor visuals remain eligible. " +
+                    "FuryPlusPlus settings show the approval check status.",
+                    "Open FuryPlusPlus", "Close")) {
+                SettingsWindow.Open();
+            }
+        }
+
+        /**
+         * A downloaded approval applies only after a script reload (patches never change from a
+         * network callback), so offer that reload instead of leaving a stale "disabled" message.
+         * Asked once per downloaded revision per session; never inside play mode.
+         */
+        private static void OfferReload(string vrcfuryVersion) {
+            if (Application.isBatchMode) return;
+            if (EditorApplication.isPlayingOrWillChangePlaymode) {
+                EditorApplication.playModeStateChanged -= OfferReloadInEditMode;
+                EditorApplication.playModeStateChanged += OfferReloadInEditMode;
+                return;
+            }
+            var revision = CompatibilityApprovals.SavedRevision;
+            if (SessionState.GetInt(ReloadOfferedRevisionKey, 0) == revision) return;
+            SessionState.SetInt(ReloadOfferedRevisionKey, revision);
+            if (EditorUtility.DisplayDialog(
+                    "FuryPlusPlus: approval downloaded",
+                    $"FuryPlusPlus {PackageIdentity.Version} with VRCFury {vrcfuryVersion} is approved.\n\n" +
+                    "Optimizations turn on when Unity reloads scripts. Until then, avatars bake with stock VRCFury.",
+                    "Reload scripts", "Later")) {
+                EditorUtility.RequestScriptReload();
+            }
+        }
+
+        private static void OfferReloadInEditMode(PlayModeStateChange state) {
+            if (state != PlayModeStateChange.EnteredEditMode) return;
+            EditorApplication.playModeStateChanged -= OfferReloadInEditMode;
+            ExplainApproval();
         }
 
         private static void Unpatch() {

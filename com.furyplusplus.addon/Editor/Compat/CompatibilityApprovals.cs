@@ -14,11 +14,24 @@ namespace FuryPlusPlus {
         private static bool initialized;
         private static CompatibilityCatalog active;
         private static CompatibilityCatalog latest;
+        private static bool latestFresh;
         private static UnityWebRequest request;
         private static BoundedDownload download;
         private static string cachePath;
 
         internal static bool IsChecking => request != null;
+
+        /** Revision of the most recent valid list (cached or downloaded); 0 when there is none. */
+        internal static int SavedRevision => latest?.Revision ?? 0;
+
+        /**
+         * True once this domain's startup check has finished, failed, or been skipped. Until then,
+         * warnings about a missing approval wait: the check may be about to download one.
+         */
+        internal static bool StartupCheckSettled { get; private set; }
+
+        /** Raised (on the main thread) whenever a check finishes, fails, is cancelled or is skipped at startup. */
+        internal static event Action CheckFinished;
         internal static string Status { get; private set; } = "Approval list has not been checked.";
 
         internal static void Initialize() {
@@ -32,6 +45,7 @@ namespace FuryPlusPlus {
                     && CompatibilityCache.TryRead(File.ReadAllText(cachePath), DateTime.UtcNow,
                         out var cached, out var fresh)) {
                     latest = cached;
+                    latestFresh = fresh;
                     if (fresh) active = cached;
                     Status = fresh ? "Using cached approvals."
                         : "Cached approvals are older than 30 days; a refresh is required.";
@@ -42,12 +56,12 @@ namespace FuryPlusPlus {
             AssemblyReloadEvents.beforeAssemblyReload += CancelRequest;
             EditorApplication.quitting += CancelRequest;
             // Batch imports and tests must not depend on a background network request.
-            if (!Application.isBatchMode) EditorApplication.delayCall += CheckAutomatically;
+            if (Application.isBatchMode) StartupCheckSettled = true;
+            else EditorApplication.delayCall += CheckAutomatically;
         }
 
         private static void CheckAutomatically() {
-            if (!Settings.MasterEnabled) return;
-            if (ResolveAutomaticCheckConsent(Application.isBatchMode, () => EditorUtility.DisplayDialog(
+            if (Settings.MasterEnabled && ResolveAutomaticCheckConsent(Application.isBatchMode, () => EditorUtility.DisplayDialog(
                     "Fury++ compatibility checks",
                     "May Fury++ regularly check GitHub for supported VRCFury versions?\n\n"
                     + "The developer manually tests each Fury++ and VRCFury combination before approving it. "
@@ -61,6 +75,7 @@ namespace FuryPlusPlus {
                     "Allow automatic checks", "No thanks"))) {
                 CheckNow();
             }
+            if (!IsChecking) Finish();
         }
 
         internal static bool ResolveAutomaticCheckConsent(bool isBatchMode, Func<bool> ask) {
@@ -80,6 +95,7 @@ namespace FuryPlusPlus {
             } else if (IsChecking) {
                 CancelRequest();
                 Status = "Approval check cancelled. Cached approvals are unchanged.";
+                Finish();
             }
         }
 
@@ -88,11 +104,21 @@ namespace FuryPlusPlus {
             return active != null && active.Approves(furyPlusPlus, vrcfury);
         }
 
+        /**
+         * Whether the saved list would approve the pair after the next script reload. Differs from
+         * IsApproved only when a download arrived in this domain; an expired cache never approves.
+         */
+        internal static bool IsApprovedAfterReload(string furyPlusPlus, string vrcfury) {
+            Initialize();
+            return latestFresh && latest != null && latest.Approves(furyPlusPlus, vrcfury);
+        }
+
         internal static void SaveForNextReload(CompatibilityCatalog catalog) {
             Initialize();
             if (!catalog.CanReplace(latest)) throw new InvalidDataException("Compatibility list is older than the cached decision.");
             CompatibilityCache.Write(cachePath, catalog, DateTime.UtcNow);
             latest = catalog;
+            latestFresh = true;
             Status = "Approvals saved. Restart Unity or reload scripts to apply them.";
         }
 
@@ -111,6 +137,7 @@ namespace FuryPlusPlus {
             } catch (Exception e) {
                 Status = "Could not check approvals: " + e.Message;
                 CancelRequest();
+                Finish();
             }
         }
 
@@ -139,6 +166,17 @@ namespace FuryPlusPlus {
                 Status = "Could not save approvals: " + e.Message;
             } finally {
                 CancelRequest();
+                Finish();
+            }
+        }
+
+        /** Not called when a script reload or quit aborts the request: that domain is going away. */
+        private static void Finish() {
+            StartupCheckSettled = true;
+            try {
+                CheckFinished?.Invoke();
+            } catch (Exception e) {
+                Log.Warn("Approval check listener failed: " + e.Message);
             }
         }
 
