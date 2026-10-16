@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.3.1 (2026-10-16)
+
+Fixes misleading compatibility and play-mode warnings. Bake output is unchanged.
+
+- **Approval warning timing:** a project without cached approvals no longer reports
+  "optimizations disabled" while the automatic check is still downloading an approval.
+  The warning waits for the check. When the downloaded list approves the installed pair,
+  FuryPlusPlus offers to reload scripts, and settings show the pending approval with a
+  reload button. Approvals still apply only after a script reload.
+- **Avatars without VRCFury components:** end-of-build passes no longer run when VRCFury
+  skips an avatar. In play mode, such avatars previously logged a warning for each
+  toggle conversion and blendtree consolidation pass.
+
 ## 1.3.0 — 2026-09-05
 
 Adds compatibility approvals for exact FuryPlusPlus/VRCFury release pairs. New VRCFury
