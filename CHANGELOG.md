@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.3.2 (2026-10-31)
+
+Restores full optimization coverage on VRCFury 1.1435.0 and later, and handles the face
+tracking and parameter encoding features of VRChat SDK 3.10.6.
+
+- **VRCFury 1.1435.0 compatibility:** VRCFury added an optional parameter to its mesh and
+  asset clone helpers. Armature skin indexing, the blendshape optimizer rewrite and the
+  compressor solver now accept both forms and pass VRCFury's default, so they install
+  again instead of falling back to stock VRCFury.
+- **Face tracking blendshapes:** with SDK 3.10.6 face tracking, the blendshape optimizer
+  rewrite keeps the blendshapes that the avatar descriptor's face tracking drives on its
+  face tracking meshes, matching VRCFury 1.1435.0. On earlier VRCFury releases it keeps
+  stock behavior, so the speed module stays output-identical.
+- **Compressor eligibility:** parameters added by eligibility globs must have a network
+  encoding the compressor can keep. VRCFury 1.1435.0 fails the build when asked to
+  compress a parameter with a custom bit width or signedness.
+- **Unused parameter stripping:** a face tracking blend set driven by a parameter now
+  counts as a read of that parameter, so the parameter stays synced.
+- **Custom parameter encodings:** with SDK 3.10.6, sync bit counts use each parameter's
+  own bit width, and Int narrowing leaves parameters with a custom bit width or
+  signedness unchanged. FuryPlusPlus no longer calls the SDK method that 3.10.6 marks
+  obsolete.
 ## 1.3.1 (2026-10-16)
 
 Fixes misleading compatibility and play-mode warnings. Bake output is unchanged.
