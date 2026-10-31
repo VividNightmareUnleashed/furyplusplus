@@ -69,7 +69,7 @@ namespace FuryPlusPlus {
                 armatureType, "GetUsageReasons",
                 method => method.IsStatic && method.GetParameters().Length == 1
                     && method.GetParameters()[0].ParameterType.FullName == "VF.Utils.VFGameObject");
-            GetMutableMesh = ReflectionUtils.FindMethodWithSignature(
+            GetMutableMesh = ReflectionUtils.FindMethodWithLeadingSignature(
                 ReflectionUtils.FindType("VF.Utils.RendererExtensions"),
                 "GetMutableMesh", typeof(Mesh), typeof(Renderer), typeof(string));
             Dirty = ReflectionUtils.FindMethodWithSignature(

@@ -146,10 +146,11 @@ namespace FuryPlusPlus {
                 if (!slotsByBone.TryGetValue(rewrite.From, out var slots) || slots.Count == 0) continue;
 
                 if (!changed) {
-                    mesh = ReflectionUtils.InvokeUnwrapped(ArmatureCompat.GetMutableMesh, null, new object[] {
-                        skin,
-                        "Needed to change bone bind-poses for Armature Link to re-use bones on base armature"
-                    }) as Mesh;
+                    mesh = ReflectionUtils.InvokeUnwrapped(ArmatureCompat.GetMutableMesh, null,
+                        ReflectionUtils.PadOptionalArgs(ArmatureCompat.GetMutableMesh, new object[] {
+                            skin,
+                            "Needed to change bone bind-poses for Armature Link to re-use bones on base armature"
+                        })) as Mesh;
                     bindposes = mesh?.bindposes;
                     changed = true;
                 }

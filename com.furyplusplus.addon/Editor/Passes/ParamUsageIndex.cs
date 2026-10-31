@@ -124,6 +124,18 @@ namespace FuryPlusPlus {
         }
 
         private void AddBehaviour(StateMachineBehaviour behaviour) {
+#if VRCSDK_HAS_FACE_TRACKING
+            // Parameter-sourced face tracking blend sets read their source parameter.
+            if (behaviour is VRC_AnimatorFaceTrackingBlendshapesSet faceTracking) {
+                if (faceTracking.blendSets == null) return;
+                foreach (var set in faceTracking.blendSets) {
+                    if (set != null && set.type == VRC_AnimatorFaceTrackingBlendshapesSet.SourceType.Parameter) {
+                        AddRead(set.sourceParameter);
+                    }
+                }
+                return;
+            }
+#endif
             if (!(behaviour is VRC_AvatarParameterDriver driver) || driver.parameters == null) return;
             foreach (var parameter in driver.parameters) {
                 if (parameter == null) continue;

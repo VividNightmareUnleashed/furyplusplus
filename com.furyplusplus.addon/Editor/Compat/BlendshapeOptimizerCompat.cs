@@ -29,6 +29,9 @@ namespace FuryPlusPlus {
         internal static MethodInfo IsMaybeMmdBlendshape;
         internal static MethodInfo MeshDirty;
         internal static MethodInfo Apply;
+        // VRCFury 1.1435.0+ keeps face-tracking blendshapes (compiled only with the SDK's
+        // face tracking). The rewrite mirrors that exactly when stock has it.
+        internal static bool StockKeepsFaceTrackingBlendshapes;
 
         internal static void EnsureResolved() {
             if (resolved) return;
@@ -63,9 +66,10 @@ namespace FuryPlusPlus {
 
             SkinGetMesh = FindExtension("VF.Utils.RendererExtensions", "GetMesh", 1)
                           ?? FindExtension("VF.Utils.SkinnedMeshRendererExtensions", "GetMesh", 1);
-            SkinGetMutableMesh = FindExtension("VF.Utils.RendererExtensions", "GetMutableMesh", 2)
+            // 1.1435.0 appended `bool forceClone = false`; invoke via PadOptionalArgs.
+            SkinGetMutableMesh = FindExtension("VF.Utils.RendererExtensions", "GetMutableMesh", 2, true)
                                  ?? FindExtension(
-                                     "VF.Utils.SkinnedMeshRendererExtensions", "GetMutableMesh", 2);
+                                     "VF.Utils.SkinnedMeshRendererExtensions", "GetMutableMesh", 2, true);
             SkinOwner = FindExtension("VF.Utils.VFGameObjectExtensions", "owner", 1);
             OwnerGetPath = vfGameObjectType?
                 .GetMethods(any)
@@ -82,6 +86,9 @@ namespace FuryPlusPlus {
             MeshDirty = FindExtension("VF.Utils.UnityCompatUtils", "Dirty", 1)
                         ?? FindExtension("VF.Utils.ObjectExtensions", "Dirty", 1);
             Apply = ReflectionUtils.FindNoArgVoid(builderType, "Apply");
+            StockKeepsFaceTrackingBlendshapes = builderType?
+                .GetMethods(any | BindingFlags.Static | BindingFlags.DeclaredOnly)
+                .Any(method => method.Name == "GetFaceTrackingBlendshapeNames") ?? false;
         }
 
         internal static void DemandCore() {
@@ -134,11 +141,18 @@ namespace FuryPlusPlus {
             item2 = ReflectionUtils.Demand(type.GetField("Item2"), "tuple Item2");
         }
 
-        private static MethodInfo FindExtension(string typeName, string methodName, int paramCount) {
+        private static MethodInfo FindExtension(
+            string typeName,
+            string methodName,
+            int paramCount,
+            bool allowTrailingOptional = false
+        ) {
             var type = ReflectionUtils.FindType(typeName);
             return type?.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
                 .FirstOrDefault(method => method.Name == methodName
-                                          && method.GetParameters().Length == paramCount);
+                                          && (allowTrailingOptional
+                                              ? ReflectionUtils.AcceptsLeadingArgs(method, paramCount)
+                                              : method.GetParameters().Length == paramCount));
         }
     }
 }

@@ -128,7 +128,8 @@ namespace FuryPlusPlus {
             var paramsService = CompressorCompat.SolverParamsService.GetValue(solver);
             var readOnlyParams = CompressorCompat.ParamsGetReadOnly.Invoke(paramsService, null);
             var paramz = (VRCExpressionParameters)CompressorCompat.ParamsClone
-                .Invoke(null, new[] { readOnlyParams, null, "", (object)true });
+                .Invoke(null, ReflectionUtils.PadOptionalArgs(CompressorCompat.ParamsClone,
+                    new[] { readOnlyParams, null, "", (object)true }));
             var originalCost = paramz.CalcTotalCost();
             var maxCost = (int)CompressorCompat.GetMaxCost.Invoke(null, null);
             if (originalCost <= maxCost) {

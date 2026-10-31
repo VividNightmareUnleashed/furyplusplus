@@ -153,7 +153,8 @@ namespace FuryPlusPlus {
             // The original mesh keeps all shape data after the mutable clone.
             var originalMesh = mesh;
             mesh = BlendshapeOptimizerCompat.SkinGetMutableMesh.Invoke(null,
-                new object[] { skin, "Needed to remove blendshapes for blendshape optimizer" }) as Mesh;
+                ReflectionUtils.PadOptionalArgs(BlendshapeOptimizerCompat.SkinGetMutableMesh,
+                    new object[] { skin, "Needed to remove blendshapes for blendshape optimizer" })) as Mesh;
             if (mesh == null) throw new Exception("GetMutableMesh returned null");
 
             // GetMutableMesh can return the same object when an earlier pass already made
@@ -423,7 +424,60 @@ namespace FuryPlusPlus {
                 }
             }
 
+#if VRCSDK_HAS_FACE_TRACKING
+            if (BlendshapeOptimizerCompat.StockKeepsFaceTrackingBlendshapes) {
+                foreach (var blendshape in GetFaceTrackingBlendshapeNames(skin, avatar)) {
+                    animatedBlendshapes.Add(blendshape);
+                }
+            }
+#endif
+
             return animatedBlendshapes;
         }
+
+#if VRCSDK_HAS_FACE_TRACKING
+        /**
+         * Mirrors VRCFury 1.1435.0's GetFaceTrackingBlendshapeNames: blendshapes driven by the
+         * descriptor's face tracking (blend sets, viseme sets, and parameter behaviours that
+         * target a blendshape) must survive the bake on face-tracking meshes.
+         */
+        internal static IEnumerable<string> GetFaceTrackingBlendshapeNames(
+            SkinnedMeshRenderer skin,
+            VRCAvatarDescriptor avatar
+        ) {
+            if (!avatar.enableFaceTracking
+                || avatar.faceTrackingMeshes == null
+                || !avatar.faceTrackingMeshes.Contains(skin)) yield break;
+
+            if (avatar.faceTrackingBlendshapesSetList != null) {
+                foreach (var set in avatar.faceTrackingBlendshapesSetList) {
+                    if (set == null) continue;
+                    foreach (var name in NonEmpty(set.faceTrackingBlendshapeNames)) yield return name;
+                    foreach (var name in NonEmpty(set.visemeBlendshapeNames)) yield return name;
+                }
+            }
+
+            if (avatar.faceTrackingParameterBehaviors != null) {
+                foreach (var behavior in avatar.faceTrackingParameterBehaviors) {
+                    if (behavior == null) continue;
+                    if (behavior.targetMode != VRCAvatarDescriptor.ParameterBehaviorTargetMode.ApplyToBlendshape
+                        && behavior.targetMode != VRCAvatarDescriptor.ParameterBehaviorTargetMode.LimitBlendshapeMax
+                        && behavior.targetMode != VRCAvatarDescriptor.ParameterBehaviorTargetMode.LimitBlendshapeMin) {
+                        continue;
+                    }
+                    if (!string.IsNullOrEmpty(behavior.targetBlendshapeName)) {
+                        yield return behavior.targetBlendshapeName;
+                    }
+                }
+            }
+        }
+
+        private static IEnumerable<string> NonEmpty(string[] names) {
+            if (names == null) yield break;
+            foreach (var name in names) {
+                if (!string.IsNullOrEmpty(name)) yield return name;
+            }
+        }
+#endif
     }
 }

@@ -89,6 +89,9 @@ namespace FuryPlusPlus {
                                         && !present.Contains(parameter.name)
                                         && !buttonParams.Contains(parameter.name)
                                         && !addDriven.Contains(parameter.name)
+                                        // VRCFury 1.1435.0 fails the build when asked to
+                                        // compress a non-standard width or signedness.
+                                        && CompressorCompat.CanCompressEncoding(parameter)
                                         && CompressorScope.EligibilityGlobs
                                             .Any(glob => glob.IsMatch(parameter.name)))
                     .ToList();

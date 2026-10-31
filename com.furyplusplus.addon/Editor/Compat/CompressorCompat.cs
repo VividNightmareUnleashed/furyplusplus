@@ -28,6 +28,9 @@ namespace FuryPlusPlus {
         internal static MethodInfo SolverPublicSolve;         // GetParamsToOptimize()
         internal static MethodInfo SolverPrivateSolve;        // GetParamsToOptimize(paramz, types, addDriven, cost, bad)
         internal static MethodInfo SolverGetParamsUsedInMenu; // (ISet<ControlType>) → ISet<string>
+        // VRCFury 1.1435.0+: parameters whose bit width or signedness the compressor can't keep.
+        // Absent on older releases, which compress every eligible parameter.
+        internal static MethodInfo HasStandardNetworkEncoding; // static (Parameter) → bool
         internal static FieldInfo SolverParamsService;
         internal static FieldInfo SolverControllers;
         internal static FieldInfo SolverExcService;
@@ -140,19 +143,25 @@ namespace FuryPlusPlus {
                     });
             }
 
+            HasStandardNetworkEncoding = ReflectionUtils.FindMethodWithSignature(
+                ReflectionUtils.FindType("VF.Utils.VRCExpressionParameterExtensions"),
+                "HasStandardNetworkEncoding", typeof(bool),
+                typeof(VRC.SDK3.Avatars.ScriptableObjects.VRCExpressionParameters.Parameter));
+
             var paramsServiceType = ReflectionUtils.FindType("VF.Service.ParamsService");
             ParamsGetReadOnly = paramsServiceType == null ? null : ReflectionUtils.FindUniqueMethod(
                 paramsServiceType, "GetReadOnlyParams", method => method.GetParameters().Length == 0);
             var paramsExtType = ReflectionUtils.FindType("VF.Utils.VRCExpressionParametersExtensions");
             GetMaxCost = paramsExtType == null ? null : ReflectionUtils.FindUniqueMethod(
                 paramsExtType, "GetMaxCost", method => method.GetParameters().Length == 0);
-            // paramz.Clone() is the generic ObjectExtensions.Clone<T>(original, reason, prefix, recursive).
+            // paramz.Clone() is the generic ObjectExtensions.Clone<T>(original, reason, prefix, recursive);
+            // 1.1435.0 appended `bool forceClone = false`, so invoke it via PadOptionalArgs.
             var objectExtType = ReflectionUtils.FindType("VF.Utils.ObjectExtensions");
             var openClone = objectExtType?
                 .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
                 .SingleOrDefault(method => method.Name == "Clone"
                                            && method.IsGenericMethodDefinition
-                                           && method.GetParameters().Length == 4);
+                                           && ReflectionUtils.AcceptsLeadingArgs(method, 4));
             ParamsClone = openClone?.MakeGenericMethod(
                 typeof(VRC.SDK3.Avatars.ScriptableObjects.VRCExpressionParameters));
 
@@ -236,6 +245,14 @@ namespace FuryPlusPlus {
             ReflectionUtils.Demand(BatchesItem1, "GetBatches return tuple Item1");
             ReflectionUtils.Demand(BatchesItem2, "GetBatches return tuple Item2");
             ReflectionUtils.Demand(CompressorApply, "ParameterCompressorService.Apply()");
+        }
+
+        /** Stock's encoding check, or true on VRCFury releases without one. */
+        internal static bool CanCompressEncoding(
+            VRC.SDK3.Avatars.ScriptableObjects.VRCExpressionParameters.Parameter parameter
+        ) {
+            return HasStandardNetworkEncoding == null
+                   || (bool)ReflectionUtils.InvokeUnwrapped(HasStandardNetworkEncoding, null, new object[] { parameter });
         }
 
         internal static object NewSolverOutput() {

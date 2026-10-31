@@ -92,6 +92,51 @@ namespace FuryPlusPlus {
             });
         }
 
+        /**
+         * Like FindMethodWithSignature, but also accepts trailing optional parameters that
+         * VRCFury appends to an existing method (GetMutableMesh gained `forceClone = false`
+         * in 1.1435.0). Invoke the result through PadOptionalArgs so the extras get their
+         * declared defaults, which is what VRCFury's own call sites pass.
+         */
+        internal static MethodInfo FindMethodWithLeadingSignature(
+            Type type,
+            string name,
+            Type returnType,
+            params Type[] parameterTypes
+        ) {
+            return FindUniqueMethod(type, name, method => {
+                if (method.ReturnType != returnType) return false;
+                if (!AcceptsLeadingArgs(method, parameterTypes.Length)) return false;
+                var parameters = method.GetParameters();
+                for (var i = 0; i < parameterTypes.Length; i++) {
+                    if (parameters[i].ParameterType != parameterTypes[i]) return false;
+                }
+                return true;
+            });
+        }
+
+        /** True when the method takes `count` leading arguments and every later one is optional. */
+        internal static bool AcceptsLeadingArgs(MethodBase method, int count) {
+            var parameters = method.GetParameters();
+            if (parameters.Length < count) return false;
+            for (var i = count; i < parameters.Length; i++) {
+                if (!parameters[i].IsOptional) return false;
+            }
+            return true;
+        }
+
+        /** Appends the declared default for every optional parameter past `args`. */
+        internal static object[] PadOptionalArgs(MethodBase method, object[] args) {
+            var parameters = method.GetParameters();
+            if (args.Length >= parameters.Length) return args;
+            var padded = new object[parameters.Length];
+            Array.Copy(args, padded, args.Length);
+            for (var i = args.Length; i < parameters.Length; i++) {
+                padded[i] = parameters[i].HasDefaultValue ? parameters[i].DefaultValue : Type.Missing;
+            }
+            return padded;
+        }
+
         internal static object CreateEmptyImmutableSet(Type setType) {
             try {
                 var arguments = setType.GetGenericArguments();
