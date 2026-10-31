@@ -45,6 +45,81 @@ namespace FuryPlusPlus.Tests.Editor {
             Assert.AreEqual(stockHasIt, CompressorCompat.HasStandardNetworkEncoding != null);
         }
 
+        [Test]
+        public void StandardParametersCostTheirTypeWidth() {
+            Assert.AreEqual(1, ParameterEncoding.BitCost(
+                new VRCExpressionParameters.Parameter { valueType = VRCExpressionParameters.ValueType.Bool }));
+            Assert.AreEqual(8, ParameterEncoding.BitCost(
+                new VRCExpressionParameters.Parameter { valueType = VRCExpressionParameters.ValueType.Int }));
+            Assert.AreEqual(8, ParameterEncoding.BitCost(
+                new VRCExpressionParameters.Parameter { valueType = VRCExpressionParameters.ValueType.Float }));
+        }
+
+        [Test]
+        public void StandardIntStaysNarrowable() {
+            var parameter = new VRCExpressionParameters.Parameter {
+                name = "Toggle", valueType = VRCExpressionParameters.ValueType.Int, networkSynced = true,
+            };
+            Assert.AreEqual(NarrowIntParamsPass.Verdict.Eligible, NarrowIntParamsPass.Classify(
+                parameter, new ParamUsageIndex(), new System.Collections.Generic.List<System.Text.RegularExpressions.Regex>()));
+        }
+
+#if VRCSDK_HAS_DYNAMIC_PARAMETER_BIT_WIDTH
+        [Test]
+        public void CustomBitWidthAndSignednessAreNotStandard() {
+            var narrow = new VRCExpressionParameters.Parameter {
+                valueType = VRCExpressionParameters.ValueType.Int, bitWidth = 4,
+            };
+            Assert.AreEqual(4, ParameterEncoding.BitCost(narrow));
+            Assert.IsFalse(ParameterEncoding.IsStandard(narrow));
+
+            var signed = new VRCExpressionParameters.Parameter {
+                valueType = VRCExpressionParameters.ValueType.Int, flippedRepresentation = true,
+            };
+            Assert.AreEqual(8, ParameterEncoding.BitCost(signed));
+            Assert.IsFalse(ParameterEncoding.IsStandard(signed));
+
+            var flippedBool = new VRCExpressionParameters.Parameter {
+                valueType = VRCExpressionParameters.ValueType.Bool, flippedRepresentation = true,
+            };
+            Assert.IsTrue(ParameterEncoding.IsStandard(flippedBool));
+        }
+
+        [Test]
+        public void CustomEncodedIntIsNotNarrowed() {
+            var keepGlobs = new System.Collections.Generic.List<System.Text.RegularExpressions.Regex>();
+            foreach (var parameter in new[] {
+                         new VRCExpressionParameters.Parameter {
+                             name = "Narrow", valueType = VRCExpressionParameters.ValueType.Int,
+                             networkSynced = true, bitWidth = 2,
+                         },
+                         new VRCExpressionParameters.Parameter {
+                             name = "Signed", valueType = VRCExpressionParameters.ValueType.Int,
+                             networkSynced = true, flippedRepresentation = true,
+                         },
+                     }) {
+                Assert.AreEqual(NarrowIntParamsPass.Verdict.Ineligible,
+                    NarrowIntParamsPass.Classify(parameter, new ParamUsageIndex(), keepGlobs), parameter.name);
+            }
+        }
+
+        [Test]
+        public void EncodingCheckMatchesVrcfury() {
+            CompressorCompat.EnsureResolved();
+            if (CompressorCompat.HasStandardNetworkEncoding == null) {
+                Assert.Ignore("Installed VRCFury has no encoding check.");
+            }
+            foreach (var parameter in new[] {
+                         new VRCExpressionParameters.Parameter { valueType = VRCExpressionParameters.ValueType.Int },
+                         new VRCExpressionParameters.Parameter { valueType = VRCExpressionParameters.ValueType.Float, bitWidth = 5 },
+                         new VRCExpressionParameters.Parameter { valueType = VRCExpressionParameters.ValueType.Int, flippedRepresentation = true },
+                         new VRCExpressionParameters.Parameter { valueType = VRCExpressionParameters.ValueType.Bool, bitWidth = 3 },
+                     }) {
+                Assert.AreEqual(CompressorCompat.CanCompressEncoding(parameter), ParameterEncoding.IsStandard(parameter));
+            }
+        }
+#endif
+
 #if VRCSDK_HAS_FACE_TRACKING
         private VRCAvatarDescriptor MakeAvatarWithFaceTrackingState(
             params VRC_AnimatorFaceTrackingBlendshapesSet.BlendSet[] sets

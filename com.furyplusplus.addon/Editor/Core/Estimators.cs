@@ -54,7 +54,7 @@ namespace FuryPlusPlus {
                             .ToList();
                         result.StrippableParams = strippable.Count;
                         result.StrippableBits = strippable
-                            .Sum(parameter => VRCExpressionParameters.TypeCost(parameter.valueType));
+                            .Sum(parameter => ParameterEncoding.BitCost(parameter));
 
                         var strippedNames = new HashSet<string>(strippable.Select(p => p.name));
                         result.NarrowableInts = paramsAsset.parameters.Count(parameter =>

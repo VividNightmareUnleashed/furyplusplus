@@ -133,7 +133,7 @@ namespace FuryPlusPlus {
 
                 parameter.networkSynced = false;
                 stripped.Add(parameter.name);
-                bits += VRCExpressionParameters.TypeCost(parameter.valueType);
+                bits += ParameterEncoding.BitCost(parameter);
             }
 
             if (stripped.Count > 0) {

@@ -78,6 +78,9 @@ namespace FuryPlusPlus {
         ) {
             if (parameter == null || !parameter.networkSynced) return Verdict.Ineligible;
             if (parameter.valueType != VRCExpressionParameters.ValueType.Int) return Verdict.Ineligible;
+            // A custom bit width or signedness is a deliberate wire format; the 7-bit saving
+            // also assumes a standard 8-bit Int.
+            if (!ParameterEncoding.IsStandard(parameter)) return Verdict.Ineligible;
             if (string.IsNullOrEmpty(parameter.name)) return Verdict.Ineligible;
             if (parameter.defaultValue != 0 && parameter.defaultValue != 1) return Verdict.Ineligible;
             if (keepGlobs.Any(glob => glob.IsMatch(parameter.name))) return Verdict.Ineligible;
