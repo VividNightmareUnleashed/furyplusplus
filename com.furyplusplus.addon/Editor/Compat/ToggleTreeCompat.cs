@@ -93,6 +93,7 @@ namespace FuryPlusPlus {
         internal static MethodInfo ControllerTryGetParam;      // VFController.TryGetParam(string, out VFAParam)
         internal static PropertyInfo ControllerParameters;     // VFController.parameters → VFAParam[]
         internal static MethodInfo ParamSave;                  // VFAParam.Save() → AnimatorControllerParameter
+        internal static MethodInfo ControllerGetOrCreateFloat; // VFController.GetOrCreateFloat(string, FloatOrBool)
         internal static Type ClipsIteratorType;                // AnimatorIterator+Clips
         internal static MethodInfo ClipsFromMotion;            // AnimatorIterator.Clips.From(VFMotion)
         private static MethodInfo clipCreate;                  // VFClip.Create(string)
@@ -281,6 +282,8 @@ namespace FuryPlusPlus {
                 ParamSave = ReflectionUtils.FindUniqueMethod(vfaParamType, "Save",
                     method => !method.IsStatic && method.GetParameters().Length == 0
                               && method.ReturnType == typeof(UnityEngine.AnimatorControllerParameter));
+                ControllerGetOrCreateFloat = floatOrBoolType == null ? null : ReflectionUtils.FindMethodWithSignature(
+                    vfControllerType, "GetOrCreateFloat", vfaParamType, typeof(string), floatOrBoolType);
             }
             ClipsIteratorType = ReflectionUtils.FindType("VF.Utils.AnimatorIterator+Clips");
             ClipsFromMotion = ClipsIteratorType == null ? null : ReflectionUtils.FindUniqueMethod(

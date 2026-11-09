@@ -178,6 +178,28 @@ namespace FuryPlusPlus.Tests.Editor {
         }
 
         [Test]
+        public void Sub8DeclaresItsTreeInputsAsFloats() {
+            RequireParameterModel();
+            Sub8Surgery.Resolve();
+            var controller = NewAvatarController();
+            GetOrCreate(controller, "GetOrCreateInt", "VF7_SyncDataNum0", 0f);
+            GetOrCreate(controller, "GetOrCreateFloat", "Declared", 0.25f);
+
+            Sub8Surgery.DeclareTreeInputs(controller, new[] {
+                ("FPPT_S0", 0.5f), ("Declared", 0.9f), ("VF7_SyncDataNum0", 0f)
+            });
+
+            var packed = ToggleTreeCompat.FindParameter(controller, "FPPT_S0");
+            Assert.AreEqual(AnimatorControllerParameterType.Float, packed.type);
+            Assert.AreEqual(0.5f, packed.defaultFloat);
+            Assert.AreEqual(0.25f, ToggleTreeCompat.FindParameter(controller, "Declared").defaultFloat,
+                "an existing declaration keeps its default");
+            Assert.AreEqual(AnimatorControllerParameterType.Float,
+                ToggleTreeCompat.FindParameter(controller, "VF7_SyncDataNum0").type,
+                "the int sync slot is read by a blend tree");
+        }
+
+        [Test]
         public void SolverReadsExpressionParamsSnapshot() {
             RequireParameterModel();
             CompressorSolverPatch.Resolve();

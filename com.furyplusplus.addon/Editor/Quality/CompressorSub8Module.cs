@@ -110,6 +110,8 @@ namespace FuryPlusPlus {
             ReflectionUtils.Demand(ToggleTreeCompat.GetLayers, "VFController.GetLayers()");
             ReflectionUtils.Demand(ToggleTreeCompat.NewLayer, "VFAvatarController.NewLayer(string, int)");
             ReflectionUtils.Demand(ToggleTreeCompat.ControllerOne, "VFAvatarController.One()");
+            ReflectionUtils.Demand(ToggleTreeCompat.ControllerGetOrCreateFloat,
+                "VFController.GetOrCreateFloat(string, FloatOrBool)");
             ToggleTreeCompat.DemandDetachedParam();
             ReflectionUtils.Demand(ToggleTreeCompat.NewState, "VFLayer.NewState(string)");
             ReflectionUtils.Demand(ToggleTreeCompat.StateWithAnimation, "VFState.WithAnimation(VFMotion)");
@@ -245,8 +247,29 @@ namespace FuryPlusPlus {
             var oneParam = GetOneParamName(controller);
             InsertDecodeStates(compressorLayer, compressorMachine, plans, oneParam);
 
+            DeclareTreeInputs(controller, plans.SelectMany(plan => new[] {
+                (plan.Rep.name, plan.Rep.defaultValue),
+                (plan.Partner.name, plan.Partner.defaultValue),
+                (plan.SlotParamName, 0f)
+            }));
             BuildEncodeLayer(controller, plans, oneParam);
             BuildDecodeLayer(controller, compressorLayer, plans, oneParam);
+        }
+
+        /**
+         * The encode trees read the packed floats and the decode tree reads the int sync slot,
+         * all inside the compressor's controller. A blend tree parameter that controller does
+         * not declare reads 0 in game, and stock declares none of them there: the originals
+         * live in FX, and the slot is only an expression parameter that drivers copy. Declared
+         * as floats, because blend trees need float parameters and VRChat converts the synced
+         * int. A parameter the controller already declares keeps its default; an int or bool
+         * declaration becomes a float, as VRCFury's own type repair would make it.
+         */
+        internal static void DeclareTreeInputs(object controller, IEnumerable<(string Name, float Default)> inputs) {
+            foreach (var (name, def) in inputs) {
+                ReflectionUtils.InvokeUnwrapped(ToggleTreeCompat.ControllerGetOrCreateFloat, controller,
+                    new[] { name, ToggleTreeCompat.FloatOrBool(def) });
+            }
         }
 
         private static PairPlan BuildPlan(
