@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.3.3 (2026-11-09)
+
+Restores full optimization coverage on VRCFury 1.1437.0 and later. VRCFury 1.1437.0 moved
+animator and expression parameters into its own model, which removed several methods that
+FuryPlusPlus modules depended on.
+
+- **Toggle conversions:** separate local/remote toggles and fade toggles install again.
+  They read parameter types and defaults through VRCFury's new parameter model, and the
+  fade matcher recognizes VRCFury's new always-true condition (`One > 0`).
+- **Compressor solver:** reads the expression parameters through VRCFury's new
+  expression parameter service, with the same inputs as the stock solver.
+- **Compressor eligibility:** works with the parameter list that the stock solver now
+  passes. On VRCFury 1.1437.0 it fell back to stock VRCFury on every bake.
+- **Compressor 4-bit float pairs:** creates its parameters through VRCFury's new
+  controller API and uses `One > 0` for its decode transition, because VRCFury no longer
+  creates the always-true bool parameter.
+- **Compressor 4-bit float pairs fix:** the encode and decode blend trees read the packed
+  float parameters and the sync slot, but these were not declared in the controller that
+  holds the trees, so Unity reported them as missing and the packed pair carried no
+  values. They are now declared there as float parameters. This affected every earlier
+  release that had the module, for avatars that listed parameters for it.
+- **Compressor memoization:** keeps the menu walk cache. The parameter name cache is
+  removed, because VRCFury no longer has the lookup it sped up.
+
 ## 1.3.2 (2026-10-31)
 
 Restores full optimization coverage on VRCFury 1.1435.0 and later, and handles the face
