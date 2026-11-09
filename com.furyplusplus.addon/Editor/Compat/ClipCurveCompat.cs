@@ -317,12 +317,12 @@ namespace FuryPlusPlus {
             ClipSetCurves.Invoke(clip, new[] { batch });
         }
 
-        /** Every clip reachable from one VFController/ControllerManager wrapper. */
+        /** Every clip reachable from one VFController/VFAvatarController wrapper. */
         internal static IEnumerable ClipsFrom(object vfController) {
             return (IEnumerable)ControllerGetClips.Invoke(vfController, new object[] { null });
         }
 
-        /** Every used controller of the build, as VFController/ControllerManager wrappers. */
+        /** Every used controller of the build, as VFController/VFAvatarController wrappers. */
         internal static IEnumerable<object> UsedControllers(object controllersService) {
             return ((IEnumerable)GetAllUsedControllers.Invoke(controllersService, null)).Cast<object>();
         }

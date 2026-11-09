@@ -31,7 +31,7 @@ namespace FuryPlusPlus {
         // VRCFury 1.1435.0+: parameters whose bit width or signedness the compressor can't keep.
         // Absent on older releases, which compress every eligible parameter.
         internal static MethodInfo HasStandardNetworkEncoding; // static (Parameter) → bool
-        internal static FieldInfo SolverParamsService;
+        internal static FieldInfo SolverExpressionParams;     // ParameterCompressorSolverService.expressionParams
         internal static FieldInfo SolverControllers;
         internal static FieldInfo SolverExcService;
         internal static FieldInfo SolverMenuService;
@@ -45,35 +45,30 @@ namespace FuryPlusPlus {
         internal static Type CompressorServiceType;           // ParameterCompressorService
         internal static MethodInfo CompressorApply;           // Apply()
         internal static Type LayerServiceType;                // ParameterCompressorLayerService
-        internal static Type ControllerManagerType;           // VF.Utils.ControllerManager
-        internal static MethodInfo LayerBuildLayer;           // BuildLayer(OptimizationDecision, ControllerManager)
+        internal static Type AvatarControllerType;            // VF.Utils.VFAvatarController
+        internal static MethodInfo LayerBuildLayer;           // BuildLayer(OptimizationDecision, VFAvatarController)
 
-        internal static MethodInfo ParamsGetReadOnly;         // ParamsService.GetReadOnlyParams()
-        internal static MethodInfo GetMaxCost;                // VRCExpressionParametersExtensions.GetMaxCost()
-        internal static MethodInfo ParamsClone;               // VRCExpressionParametersExtensions.Clone(paramz)
+        // VRCFury 1.1437.0 replaced ParamsService/ParamManager and the VRCExpressionParameters
+        // extensions with ExpressionParamsService, which hands out detached entry snapshots.
+        internal static MethodInfo ExpressionParamsSnapshot;  // ExpressionParamsService.GetSnapshot() → Parameter[]
+        internal static MethodInfo ExpressionParamsTotalCost; // ExpressionParamsService.CalcTotalCost()
+        internal static MethodInfo GetMaxCost;                // static ExpressionParamsService.GetMaxCost()
 
         // VRCFury 1.1372.0 deleted GetAllReadOnlyControllers (it re-loaded every controller from
-        // its asset on each call). GetAllUsedControllers is the successor VRCFury moved its own
-        // IsParamUsed onto, and it yields ControllerManager (a VFController), so the parameter
-        // and layer surface both consumers need is reachable straight off the wrapper.
+        // its asset on each call). GetAllUsedControllers is the successor; it yields
+        // VFAvatarController (a VFController), so the layer surface the solver needs is
+        // reachable straight off the wrapper.
         internal static MethodInfo ControllersGetAll;         // ControllersService.GetAllUsedControllers()
-        internal static MethodInfo ControllersIsParamUsed;
-        internal static FieldInfo ControllersParamsService;
         internal static MethodInfo MenuGetReadOnly;
-        internal static MethodInfo ControllerNewParam;
-        internal static PropertyInfo ControllerParameters;
-        internal static MethodInfo ParamManagerAddSynced;
         internal static PropertyInfo ControllerLayers;
         internal static MethodInfo LayerGetDrivers;
-        internal static MethodInfo ControllerManagerOne;
-        internal static MethodInfo VfaApName;
         internal static MethodInfo FactoryCreate;
 
         internal static MethodInfo CompressorMenuItemGet;     // CompressorMenuItem.Get()
 
-        internal static MethodInfo ClipSetAap;                // AnimationClipExtensions.SetAap(clip, string, FloatOrObjectCurve)
+        internal static MethodInfo ClipSetAap;                // VFClip.SetAap(string, FloatOrObjectCurve)
         internal static MethodInfo FloatToCurve;              // FloatOrObjectCurve.op_Implicit(float)
-        internal static MethodInfo MakeAap;                   // ControllerManager.MakeAap(string, float, bool)
+        internal static MethodInfo CreateUniqueFloat;         // VFAvatarController.CreateUniqueFloat(string, FloatOrBool)
 
         internal static void EnsureResolved() {
             if (resolved) return;
@@ -113,7 +108,7 @@ namespace FuryPlusPlus {
                     method => method.GetParameters().Length == 5);
                 SolverGetParamsUsedInMenu = ReflectionUtils.FindUniqueMethod(SolverType, "GetParamsUsedInMenu",
                     method => method.GetParameters().Length == 1);
-                SolverParamsService = SolverType.GetField("paramsService", any);
+                SolverExpressionParams = SolverType.GetField("expressionParams", any);
                 SolverControllers = SolverType.GetField("controllers", any);
                 SolverExcService = SolverType.GetField("excService", any);
                 SolverMenuService = SolverType.GetField("menuService", any);
@@ -131,15 +126,15 @@ namespace FuryPlusPlus {
             CompressorServiceType = ReflectionUtils.FindType("VF.Service.Compressor.ParameterCompressorService");
             CompressorApply = CompressorServiceType == null ? null : ReflectionUtils.FindUniqueMethod(
                 CompressorServiceType, "Apply", method => method.GetParameters().Length == 0);
-            ControllerManagerType = ReflectionUtils.FindType("VF.Utils.ControllerManager");
+            AvatarControllerType = ReflectionUtils.FindType("VF.Utils.VFAvatarController");
             LayerServiceType = ReflectionUtils.FindType("VF.Service.Compressor.ParameterCompressorLayerService");
-            if (LayerServiceType != null) {
+            if (LayerServiceType != null && AvatarControllerType != null) {
                 LayerBuildLayer = ReflectionUtils.FindUniqueMethod(LayerServiceType, "BuildLayer",
                     method => {
                         var parameters = method.GetParameters();
                         return parameters.Length == 2
                                && parameters[0].ParameterType == DecisionType
-                               && parameters[1].ParameterType == ControllerManagerType;
+                               && parameters[1].ParameterType == AvatarControllerType;
                     });
             }
 
@@ -148,31 +143,26 @@ namespace FuryPlusPlus {
                 "HasStandardNetworkEncoding", typeof(bool),
                 typeof(VRC.SDK3.Avatars.ScriptableObjects.VRCExpressionParameters.Parameter));
 
-            var paramsServiceType = ReflectionUtils.FindType("VF.Service.ParamsService");
-            ParamsGetReadOnly = paramsServiceType == null ? null : ReflectionUtils.FindUniqueMethod(
-                paramsServiceType, "GetReadOnlyParams", method => method.GetParameters().Length == 0);
-            var paramsExtType = ReflectionUtils.FindType("VF.Utils.VRCExpressionParametersExtensions");
-            GetMaxCost = paramsExtType == null ? null : ReflectionUtils.FindUniqueMethod(
-                paramsExtType, "GetMaxCost", method => method.GetParameters().Length == 0);
-            // paramz.Clone() is the generic ObjectExtensions.Clone<T>(original, reason, prefix, recursive);
-            // 1.1435.0 appended `bool forceClone = false`, so invoke it via PadOptionalArgs.
-            var objectExtType = ReflectionUtils.FindType("VF.Utils.ObjectExtensions");
-            var openClone = objectExtType?
-                .GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .SingleOrDefault(method => method.Name == "Clone"
-                                           && method.IsGenericMethodDefinition
-                                           && ReflectionUtils.AcceptsLeadingArgs(method, 4));
-            ParamsClone = openClone?.MakeGenericMethod(
-                typeof(VRC.SDK3.Avatars.ScriptableObjects.VRCExpressionParameters));
+            var parameterArrayType = typeof(VRC.SDK3.Avatars.ScriptableObjects.VRCExpressionParameters.Parameter[]);
+            var expressionParamsType = ReflectionUtils.FindType("VF.Service.ExpressionParamsService");
+            if (expressionParamsType != null) {
+                ExpressionParamsSnapshot = ReflectionUtils.FindMethodWithSignature(
+                    expressionParamsType, "GetSnapshot", parameterArrayType);
+                ExpressionParamsTotalCost = ReflectionUtils.FindMethodWithSignature(
+                    expressionParamsType, "CalcTotalCost", typeof(int));
+                GetMaxCost = ReflectionUtils.FindUniqueMethod(expressionParamsType, "GetMaxCost",
+                    method => method.IsStatic && method.GetParameters().Length == 0
+                              && method.ReturnType == typeof(int));
+            }
+            if (SolverExpressionParams != null && SolverExpressionParams.FieldType != expressionParamsType) {
+                SolverExpressionParams = null;
+            }
 
             var controllersServiceType = ReflectionUtils.FindType("VF.Service.ControllersService");
             if (controllersServiceType != null) {
                 ControllersGetAll = ReflectionUtils.FindUniqueMethod(
                     controllersServiceType, "GetAllUsedControllers",
                     method => method.GetParameters().Length == 0);
-                ControllersIsParamUsed = ReflectionUtils.FindMethodWithSignature(
-                    controllersServiceType, "IsParamUsed", typeof(bool), typeof(string));
-                ControllersParamsService = controllersServiceType.GetField("paramsService", any);
             }
 
             var menuServiceType = ReflectionUtils.FindType("VF.Service.MenuService");
@@ -180,14 +170,8 @@ namespace FuryPlusPlus {
                 menuServiceType, "GetReadOnlyMenu", method => method.GetParameters().Length == 0);
             var vfControllerType = ReflectionUtils.FindType("VF.Utils.Controller.VFController");
             if (vfControllerType != null) {
-                ControllerNewParam = ReflectionUtils.FindUniqueMethod(
-                    vfControllerType, "_NewParam", method => method.GetParameters().Length == 3);
-                ControllerParameters = vfControllerType.GetProperty("parameters", any);
                 ControllerLayers = vfControllerType.GetProperty("layers", any);
             }
-            var paramManagerType = ReflectionUtils.FindType("VF.Utils.ParamManager");
-            ParamManagerAddSynced = paramManagerType == null ? null : ReflectionUtils.FindUniqueMethod(
-                paramManagerType, "AddSyncedParam", method => method.GetParameters().Length == 1);
             var layerType = ReflectionUtils.FindType("VF.Utils.Controller.VFLayer");
             var getBehaviours = layerType == null ? null : ReflectionUtils.FindUniqueMethod(
                 layerType,
@@ -203,9 +187,8 @@ namespace FuryPlusPlus {
             CompressorMenuItemGet = menuItemType == null ? null : ReflectionUtils.FindUniqueMethod(
                 menuItemType, "Get", method => method.GetParameters().Length == 0);
 
-            // SetAap(clip, name, FloatOrObjectCurve) — the curve arg converts from float via op_Implicit.
-            var clipExtType = ReflectionUtils.FindType("VF.Utils.AnimationClipExtensions");
-            // Now an instance method on VFClip: SetAap(paramName, curve).
+            // An instance method on VFClip: SetAap(paramName, FloatOrObjectCurve); the curve arg
+            // converts from float via op_Implicit.
             var vfClipType = ReflectionUtils.FindType("VF.Utils.Controller.VFClip");
             ClipSetAap = vfClipType == null ? null : ReflectionUtils.FindUniqueMethod(vfClipType, "SetAap",
                 method => method.GetParameters().Length == 2
@@ -216,13 +199,13 @@ namespace FuryPlusPlus {
                 .SingleOrDefault(method => method.Name == "op_Implicit"
                                            && method.GetParameters().Length == 1
                                            && method.GetParameters()[0].ParameterType == typeof(float));
-            MakeAap = ControllerManagerType == null ? null : ReflectionUtils.FindUniqueMethod(
-                ControllerManagerType, "MakeAap", method => method.GetParameters().Length == 3);
-            ControllerManagerOne = ControllerManagerType == null ? null : ReflectionUtils.FindUniqueMethod(
-                ControllerManagerType, "One", method => method.GetParameters().Length == 0);
-            var vfaApType = ReflectionUtils.FindType("VF.Utils.BlendtreeMath+VFAap");
-            VfaApName = vfaApType == null ? null : ReflectionUtils.FindUniqueMethod(
-                vfaApType, "Name", method => method.GetParameters().Length == 0);
+            // MakeAap(name, def) became CreateUniqueFloat(name, def): the same VF<n>_ prefixed,
+            // uniquely named float, now returned as a plain VFAParam.
+            var floatOrBoolType = ReflectionUtils.FindType("VF.Utils.FloatOrBool");
+            CreateUniqueFloat = AvatarControllerType == null || floatOrBoolType == null
+                ? null
+                : ReflectionUtils.FindMethodWithSignature(AvatarControllerType, "CreateUniqueFloat",
+                    ReflectionUtils.FindType("VF.Utils.Controller.VFAParam"), typeof(string), floatOrBoolType);
             var factoryType = ReflectionUtils.FindType("VF.Utils.VrcfObjectFactory");
             FactoryCreate = factoryType == null ? null : ReflectionUtils.FindUniqueMethod(
                 factoryType, "Create", method => !method.IsGenericMethodDefinition

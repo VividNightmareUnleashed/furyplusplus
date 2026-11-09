@@ -225,14 +225,25 @@ namespace FuryPlusPlus {
             ToggleConversionRuntime.Snapshot snapshot,
             AnimatorCondition[] conditions
         ) {
+            return IsAlwaysCondition(conditions, name => ToggleConversionRuntime.FindParam(snapshot, name));
+        }
+
+        /**
+         * VFAvatarController.Always(): `VF_<n>_One > 0` on a float that defaults to 1 and is
+         * never driven (VRCFury 1.1437.0+; it was `VF_<n>_True` on a bool before).
+         */
+        internal static bool IsAlwaysCondition(
+            AnimatorCondition[] conditions,
+            System.Func<string, AnimatorControllerParameter> findParam
+        ) {
             if (conditions.Length != 1) return false;
             var condition = conditions[0];
-            if (condition.mode != AnimatorConditionMode.If) return false;
-            if (!ToggleTreeCompat.AlwaysTrueParamName.IsMatch(condition.parameter)) return false;
-            var parameter = ToggleConversionRuntime.FindParam(snapshot, condition.parameter);
+            if (condition.mode != AnimatorConditionMode.Greater || condition.threshold != 0) return false;
+            if (!ToggleTreeCompat.AlwaysOneParamName.IsMatch(condition.parameter)) return false;
+            var parameter = findParam(condition.parameter);
             return parameter != null
-                   && parameter.type == AnimatorControllerParameterType.Bool
-                   && parameter.defaultBool;
+                   && parameter.type == AnimatorControllerParameterType.Float
+                   && parameter.defaultFloat > 0;
         }
 
         private static void Convert(
@@ -255,7 +266,7 @@ namespace FuryPlusPlus {
                         dbt, $"fadeToggle/{layerName}", target, match.FadeSeconds,
                         /* useAcceleration */ false, /* minSupported */ 0f, /* maxSupported */ float.MaxValue
                     });
-                blendParam = (string)ToggleTreeCompat.VfaParamName.Invoke(smoothed, null);
+                blendParam = ToggleTreeCompat.ParamName(smoothed);
             }
 
             var onFrame = ToggleConversionRuntime.LastFrameOrEmpty(

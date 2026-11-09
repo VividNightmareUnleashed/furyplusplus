@@ -57,16 +57,14 @@ namespace FuryPlusPlus.Tests.Editor {
         }
 
         [Test]
-        public void InstalledVrcfuryMutableMeshAndCloneLookupsResolve() {
+        public void InstalledVrcfuryMutableMeshLookupsResolve() {
             if (ReflectionUtils.FindType("VF.Utils.RendererExtensions") == null) {
                 Assert.Ignore("VRCFury not installed.");
             }
             ArmatureCompat.EnsureResolved();
             BlendshapeOptimizerCompat.EnsureResolved();
-            CompressorCompat.EnsureResolved();
             Assert.NotNull(ArmatureCompat.GetMutableMesh, "RendererExtensions.GetMutableMesh");
             Assert.NotNull(BlendshapeOptimizerCompat.SkinGetMutableMesh, "GetMutableMesh (blendshape)");
-            Assert.NotNull(CompressorCompat.ParamsClone, "ObjectExtensions.Clone<VRCExpressionParameters>");
         }
 
 #if VRCSDK_HAS_FACE_TRACKING

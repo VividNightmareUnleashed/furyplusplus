@@ -70,15 +70,21 @@ namespace FuryPlusPlus {
                 "ParameterCompressorSolverService.GetParamsToOptimize()");
             ReflectionUtils.Demand(CompressorCompat.SolverPrivateSolve,
                 "ParameterCompressorSolverService.GetParamsToOptimize(5 args)");
-            ReflectionUtils.Demand(CompressorCompat.SolverParamsService,
-                "ParameterCompressorSolverService.paramsService");
+            ReflectionUtils.Demand(CompressorCompat.SolverExpressionParams,
+                "ParameterCompressorSolverService.expressionParams");
             ReflectionUtils.Demand(CompressorCompat.SolverControllers,
                 "ParameterCompressorSolverService.controllers");
-            ReflectionUtils.Demand(CompressorCompat.ParamsGetReadOnly, "ParamsService.GetReadOnlyParams()");
-            ReflectionUtils.Demand(CompressorCompat.ParamsClone,
-                "ObjectExtensions.Clone<VRCExpressionParameters>(...)");
-            ReflectionUtils.Demand(CompressorCompat.GetMaxCost,
-                "VRCExpressionParametersExtensions.GetMaxCost()");
+            ReflectionUtils.Demand(CompressorCompat.ExpressionParamsSnapshot,
+                "ExpressionParamsService.GetSnapshot()");
+            ReflectionUtils.Demand(CompressorCompat.ExpressionParamsTotalCost,
+                "ExpressionParamsService.CalcTotalCost()");
+            ReflectionUtils.Demand(CompressorCompat.GetMaxCost, "ExpressionParamsService.GetMaxCost()");
+            var privateSolveParams = CompressorCompat.SolverPrivateSolve.GetParameters();
+            if (!privateSolveParams[0].ParameterType.IsAssignableFrom(
+                    typeof(VRCExpressionParameters.Parameter[]))) {
+                throw new MissingMemberException(
+                    "ParameterCompressorSolverService.GetParamsToOptimize(IEnumerable<Parameter>, ...)");
+            }
             ReflectionUtils.Demand(CompressorCompat.ControllersGetAll,
                 "ControllersService.GetAllUsedControllers()");
             ReflectionUtils.Demand(CompressorCompat.SolverOutputType,
@@ -125,12 +131,13 @@ namespace FuryPlusPlus {
 
         /** Returns the solver output, or null to fall back to the stock solver. */
         private static object Solve(object solver) {
-            var paramsService = CompressorCompat.SolverParamsService.GetValue(solver);
-            var readOnlyParams = CompressorCompat.ParamsGetReadOnly.Invoke(paramsService, null);
-            var paramz = (VRCExpressionParameters)CompressorCompat.ParamsClone
-                .Invoke(null, ReflectionUtils.PadOptionalArgs(CompressorCompat.ParamsClone,
-                    new[] { readOnlyParams, null, "", (object)true }));
-            var originalCost = paramz.CalcTotalCost();
+            // Same inputs as stock GetParamsToOptimize(): detached entry copies, the cost of the
+            // avatar's live parameter asset, and the SDK limit.
+            var expressionParams = CompressorCompat.SolverExpressionParams.GetValue(solver);
+            var paramz = (VRCExpressionParameters.Parameter[])ReflectionUtils.InvokeUnwrapped(
+                CompressorCompat.ExpressionParamsSnapshot, expressionParams, null);
+            var originalCost = (int)ReflectionUtils.InvokeUnwrapped(
+                CompressorCompat.ExpressionParamsTotalCost, expressionParams, null);
             var maxCost = (int)CompressorCompat.GetMaxCost.Invoke(null, null);
             if (originalCost <= maxCost) {
                 return CompressorCompat.NewSolverOutput();

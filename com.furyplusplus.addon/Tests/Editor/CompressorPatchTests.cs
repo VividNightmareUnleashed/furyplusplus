@@ -71,7 +71,7 @@ namespace FuryPlusPlus.Tests.Editor {
             var parameters = CompressorCompat.LayerBuildLayer.GetParameters();
             Assert.AreEqual(2, parameters.Length);
             Assert.AreEqual(CompressorCompat.DecisionType, parameters[0].ParameterType);
-            Assert.AreEqual(CompressorCompat.ControllerManagerType, parameters[1].ParameterType);
+            Assert.AreEqual(CompressorCompat.AvatarControllerType, parameters[1].ParameterType);
             Assert.AreEqual("controller", parameters[1].Name);
         }
 

@@ -52,6 +52,12 @@ namespace FuryPlusPlus {
             ReflectionUtils.Demand(CompressorCompat.SolverGetParamsUsedInMenu,
                 "ParameterCompressorSolverService.GetParamsUsedInMenu(types)");
             ReflectionUtils.Demand(CompressorCompat.DecisionOptimize, "OptimizationDecision.Optimize(int)");
+            // VRCFury 1.1437.0 passes detached entries instead of the parameters asset.
+            if (CompressorCompat.SolverPrivateSolve.GetParameters()[0].ParameterType
+                != typeof(IEnumerable<VRCExpressionParameters.Parameter>)) {
+                throw new System.MissingMemberException(
+                    "ParameterCompressorSolverService.GetParamsToOptimize(IEnumerable<Parameter>, ...)");
+            }
             harmony.Patch(
                 CompressorCompat.SolverPrivateSolve,
                 postfix: new HarmonyMethod(typeof(CompressorEligibilityModule), nameof(SolvePostfix))
@@ -61,7 +67,7 @@ namespace FuryPlusPlus {
         private static void SolvePostfix(
             object __instance,
             object __result,
-            object __0, // VRCExpressionParameters paramz
+            object __0, // IEnumerable<VRCExpressionParameters.Parameter> paramz (VRCFury 1.1437.0+)
             object __2, // ISet<string> addDriven
             int __3,    // originalCost
             bool __4    // useBadPriorityMethod
@@ -82,7 +88,7 @@ namespace FuryPlusPlus {
                 var buttonParams = (ISet<string>)ReflectionUtils.InvokeUnwrapped(
                     CompressorCompat.SolverGetParamsUsedInMenu, __instance, new object[] { buttonTypes });
 
-                var additions = ((VRCExpressionParameters)__0).parameters
+                var additions = ((IEnumerable<VRCExpressionParameters.Parameter>)__0)
                     .Where(parameter => parameter != null
                                         && parameter.networkSynced
                                         && !string.IsNullOrEmpty(parameter.name)

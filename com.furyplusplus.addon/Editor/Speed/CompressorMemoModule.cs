@@ -1,25 +1,22 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using HarmonyLib;
-using UnityEditor.Animations;
-using UnityEngine;
 using VRC.SDK3.Avatars.ScriptableObjects;
 
 namespace FuryPlusPlus {
     /**
-     * Memoizes the parameter compressor's two redundant scans, scoped to one
-     * ParameterCompressorService.Apply run:
-     *  1. GetParamsUsedInMenu fully re-walks the menu tree ~9× per solve (once per candidate
-     *     menu-type set plus the warning lists). The built name→menuType map is independent
-     *     of the filter argument, so one walk + cheap per-call filtering is result-identical.
-     *  2. ControllersService.IsParamUsed rescans the params asset and every controller per
-     *     probe, once per compressor-created slot/latch parameter. A name set kept EXACT
-     *     (additions tracked via _NewParam/AddSyncedParam postfixes) answers in O(1) —
-     *     exactness matters because generated SyncIndex/latch names participate in the
-     *     PC↔Quest platform alignment.
+     * Memoizes the parameter compressor's redundant menu scan, scoped to one
+     * ParameterCompressorService.Apply run: GetParamsUsedInMenu fully re-walks the menu tree
+     * ~9× per solve (once per candidate menu-type set plus the warning lists). The built
+     * name→menuType map is independent of the filter argument, so one walk + cheap per-call
+     * filtering is result-identical.
+     *
+     * Until VRCFury 1.1437.0 this module also kept an exact name set for
+     * ControllersService.IsParamUsed. That method is gone: UniqueParamService now answers
+     * with a reserved-name set and dictionary lookups on each controller, which leaves
+     * nothing worth caching, so that half was removed.
      * Pure memoization: sits below any solver, produces identical decisions.
      */
     internal sealed class CompressorMemoModule : Module<CompressorMemoModule> {
@@ -29,7 +26,7 @@ namespace FuryPlusPlus {
         internal override ModuleKind Kind => ModuleKind.Speed;
         internal override string SettingsGroup => "Controllers & animation";
         internal override string Description =>
-            "Caches the compressor's repeated menu walks and parameter-name scans within one solve.";
+            "Caches the compressor's repeated menu walks within one solve.";
 
         internal override void Install(Harmony harmony, VrcfuryCompat compat) {
             CompressorMemoPatch.Install(harmony, compat);
@@ -39,17 +36,12 @@ namespace FuryPlusPlus {
     internal static class CompressorMemoPatch {
         private sealed class Context {
             internal Dictionary<string, VRCExpressionsMenu.Control.ControlType> MenuMap;
-            internal HashSet<string> UsedNames;
         }
 
         [ThreadStatic] private static Context active;
 
         private static FieldInfo solverMenuServiceField;
         private static MethodInfo getReadOnlyMenu;
-        private static FieldInfo controllersParamsServiceField;
-        private static MethodInfo getReadOnlyParams;
-        private static MethodInfo getAllControllers;
-        private static PropertyInfo vfControllerParameters;
 
         // Priority order copied from ParameterCompressorSolverService.MenuTypePriority —
         // later entries win ties (the stock replace rule is newIndex >= oldIndex).
@@ -69,32 +61,11 @@ namespace FuryPlusPlus {
             var getParamsUsedInMenu = ReflectionUtils.Demand(
                 CompressorCompat.SolverGetParamsUsedInMenu,
                 "ParameterCompressorSolverService.GetParamsUsedInMenu(...)");
-            var isParamUsed = ReflectionUtils.Demand(
-                CompressorCompat.ControllersIsParamUsed, "ControllersService.IsParamUsed(string)");
-            var newParam = ReflectionUtils.Demand(
-                CompressorCompat.ControllerNewParam, "VFController._NewParam(...)");
-            var addSyncedParam = ReflectionUtils.Demand(
-                CompressorCompat.ParamManagerAddSynced, "ParamManager.AddSyncedParam(...)");
 
             solverMenuServiceField = ReflectionUtils.Demand(
                 CompressorCompat.SolverMenuService, "ParameterCompressorSolverService.menuService");
             getReadOnlyMenu = ReflectionUtils.Demand(
                 CompressorCompat.MenuGetReadOnly, "MenuService.GetReadOnlyMenu()");
-            controllersParamsServiceField = ReflectionUtils.Demand(
-                CompressorCompat.ControllersParamsService, "ControllersService.paramsService");
-            getReadOnlyParams = ReflectionUtils.Demand(
-                CompressorCompat.ParamsGetReadOnly, "ParamsService.GetReadOnlyParams()");
-            // VRCFury 1.1372.0 deleted GetAllReadOnlyControllers and VFController.ctrl along with
-            // it: controllers are an in-memory model now, not a wrapper around a live asset.
-            // GetAllUsedControllers is what VRCFury moved its own IsParamUsed onto, and the
-            // parameter list is exposed straight off the wrapper, so the raw AnimatorController
-            // never has to be reached for. This also covers generated controllers, which the old
-            // asset-loading read-only list could not see.
-            getAllControllers = ReflectionUtils.Demand(
-                CompressorCompat.ControllersGetAll,
-                "ControllersService.GetAllUsedControllers()");
-            vfControllerParameters = ReflectionUtils.Demand(
-                CompressorCompat.ControllerParameters, "VFController.parameters");
 
             harmony.Patch(
                 apply,
@@ -104,18 +75,6 @@ namespace FuryPlusPlus {
             harmony.Patch(
                 getParamsUsedInMenu,
                 prefix: new HarmonyMethod(typeof(CompressorMemoPatch), nameof(GetParamsUsedInMenuPrefix))
-            );
-            harmony.Patch(
-                isParamUsed,
-                prefix: new HarmonyMethod(typeof(CompressorMemoPatch), nameof(IsParamUsedPrefix))
-            );
-            harmony.Patch(
-                newParam,
-                postfix: new HarmonyMethod(typeof(CompressorMemoPatch), nameof(NewParamPostfix))
-            );
-            harmony.Patch(
-                addSyncedParam,
-                postfix: new HarmonyMethod(typeof(CompressorMemoPatch), nameof(AddSyncedParamPostfix))
             );
         }
 
@@ -217,56 +176,6 @@ namespace FuryPlusPlus {
             }
             Walk(rootMenu);
             return map;
-        }
-
-        // ---- IsParamUsed name-set ----
-
-        private static bool IsParamUsedPrefix(object __instance, string name, ref bool __result) {
-            var context = active;
-            if (context == null) return true;
-
-            try {
-                if (context.UsedNames == null) {
-                    var names = new HashSet<string>(StringComparer.Ordinal);
-                    var paramsService = controllersParamsServiceField.GetValue(__instance);
-                    if (getReadOnlyParams.Invoke(paramsService, null) is VRCExpressionParameters paramz
-                        && paramz.parameters != null) {
-                        foreach (var parameter in paramz.parameters) {
-                            if (!string.IsNullOrEmpty(parameter?.name)) names.Add(parameter.name);
-                        }
-                    }
-                    var wrappers = (IEnumerable)getAllControllers.Invoke(__instance, null);
-                    foreach (var wrapper in wrappers) {
-                        if (vfControllerParameters.GetValue(wrapper) is AnimatorControllerParameter[] parameters) {
-                            foreach (var parameter in parameters) {
-                                if (!string.IsNullOrEmpty(parameter?.name)) names.Add(parameter.name);
-                            }
-                        }
-                    }
-                    context.UsedNames = names;
-                }
-                __result = context.UsedNames.Contains(name);
-                return false;
-            } catch (Exception e) {
-                active = null;
-                Log.Warn("Compressor memoization fell back to VRCFury: " + e.Message);
-                return true;
-            }
-        }
-
-        private static void NewParamPostfix(string name) {
-            var context = active;
-            if (context?.UsedNames != null && !string.IsNullOrEmpty(name)) {
-                context.UsedNames.Add(name);
-            }
-        }
-
-        private static void AddSyncedParamPostfix(object __0) {
-            var context = active;
-            if (context?.UsedNames == null) return;
-            if (__0 is VRCExpressionParameters.Parameter parameter && !string.IsNullOrEmpty(parameter.name)) {
-                context.UsedNames.Add(parameter.name);
-            }
         }
     }
 }

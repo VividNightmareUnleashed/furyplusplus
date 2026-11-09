@@ -89,8 +89,6 @@ namespace FuryPlusPlus {
     }
 
     internal static class Sub8Surgery {
-        private static System.Reflection.MethodInfo controllerManagerOne; // ControllerManager.One() → VFAFloat
-        private static System.Reflection.MethodInfo vfaApName;            // BlendtreeMath.VFAap.Name()
         private static System.Reflection.MethodInfo factoryCreate;       // VrcfObjectFactory.Create(Type, Object)
         // Closed over VRCAvatarParameterDriver — behaviour containers hand back VFBehaviour
         // wrappers, so every driver has to come out through the typed accessor.
@@ -101,15 +99,18 @@ namespace FuryPlusPlus {
             CompressorCompat.DemandCore();
             ReflectionUtils.Demand(CompressorCompat.LayerBuildLayer,
                 "ParameterCompressorLayerService.BuildLayer(decision, controller)");
-            ReflectionUtils.Demand(CompressorCompat.ControllerManagerType,
-                "VF.Utils.ControllerManager");
+            ReflectionUtils.Demand(CompressorCompat.AvatarControllerType,
+                "VF.Utils.VFAvatarController");
             ReflectionUtils.Demand(CompressorCompat.DecisionGetIndexBitCount,
                 "OptimizationDecision.GetIndexBitCount()");
-            ReflectionUtils.Demand(CompressorCompat.MakeAap, "ControllerManager.MakeAap(string, float, bool)");
+            ReflectionUtils.Demand(CompressorCompat.CreateUniqueFloat,
+                "VFAvatarController.CreateUniqueFloat(string, FloatOrBool)");
 
             ToggleTreeCompat.EnsureResolved();
             ReflectionUtils.Demand(ToggleTreeCompat.GetLayers, "VFController.GetLayers()");
-            ReflectionUtils.Demand(ToggleTreeCompat.NewLayer, "ControllerManager.NewLayer(string, int)");
+            ReflectionUtils.Demand(ToggleTreeCompat.NewLayer, "VFAvatarController.NewLayer(string, int)");
+            ReflectionUtils.Demand(ToggleTreeCompat.ControllerOne, "VFAvatarController.One()");
+            ToggleTreeCompat.DemandDetachedParam();
             ReflectionUtils.Demand(ToggleTreeCompat.NewState, "VFLayer.NewState(string)");
             ReflectionUtils.Demand(ToggleTreeCompat.StateWithAnimation, "VFState.WithAnimation(VFMotion)");
             ReflectionUtils.Demand(ToggleTreeCompat.LayerStateMachine, "VFLayer.stateMachine");
@@ -134,16 +135,10 @@ namespace FuryPlusPlus {
             ReflectionUtils.Demand(ToggleTreeCompat.ChildMotion, "VFTreeChild.motion");
             ReflectionUtils.Demand(ToggleTreeCompat.ChildThreshold, "VFTreeChild.threshold");
             ReflectionUtils.Demand(ToggleTreeCompat.ChildDirectBlendParameter, "VFTreeChild.directBlendParameter");
-            ReflectionUtils.Demand(ToggleTreeCompat.ControllerGetParam, "VFController.GetParam(string)");
             driverBehavioursAdd = ToggleTreeCompat.CloseBehavioursAdd(
                 typeof(VRCAvatarParameterDriver));
             driverBehavioursGet = ToggleTreeCompat.CloseBehavioursGet(
                 typeof(VRCAvatarParameterDriver));
-
-            controllerManagerOne = ReflectionUtils.Demand(
-                CompressorCompat.ControllerManagerOne, "ControllerManager.One()");
-            vfaApName = ReflectionUtils.Demand(
-                CompressorCompat.VfaApName, "BlendtreeMath.VFAap.Name()");
 
             // Everything we add must be factory-created: the SaveAssets pass that runs right
             // after the compressor only attaches VrcfObjectFactory-created objects to the
@@ -151,7 +146,7 @@ namespace FuryPlusPlus {
             // sub-objects lose their cross-references when the asset reserializes.
             factoryCreate = ReflectionUtils.Demand(
                 CompressorCompat.FactoryCreate, "VrcfObjectFactory.Create(Type, Object)");
-            ReflectionUtils.Demand(CompressorCompat.ClipSetAap, "AnimationClipExtensions.SetAap(clip, name, curve)");
+            ReflectionUtils.Demand(CompressorCompat.ClipSetAap, "VFClip.SetAap(name, curve)");
             ReflectionUtils.Demand(CompressorCompat.FloatToCurve, "FloatOrObjectCurve.op_Implicit(float)");
         }
 
@@ -205,7 +200,6 @@ namespace FuryPlusPlus {
             if (compressorMachine == null) {
                 throw new Exception("FuryPlusPlus sub-8-bit packing: Parameter Compressor layer has no states.");
             }
-            var trueParam = FindTrueParam(controller);
 
             var plans = new List<PairPlan>();
             foreach (var (rep, partner) in pairs) {
@@ -246,9 +240,11 @@ namespace FuryPlusPlus {
                 }
             }
 
-            InsertDecodeStates(compressorLayer, compressorMachine, plans, trueParam);
-
+            // VFAvatarController.One(): a float that defaults to 1 and is never driven. It is
+            // both the direct-tree weight and, as `One > 0`, VRCFury's own Always() condition.
             var oneParam = GetOneParamName(controller);
+            InsertDecodeStates(compressorLayer, compressorMachine, plans, oneParam);
+
             BuildEncodeLayer(controller, plans, oneParam);
             BuildDecodeLayer(controller, compressorLayer, plans, oneParam);
         }
@@ -341,17 +337,6 @@ namespace FuryPlusPlus {
             return found;
         }
 
-        private static string FindTrueParam(object fx) {
-            var parameters = (AnimatorControllerParameter[])
-                ToggleTreeCompat.ControllerParameters.GetValue(fx);
-            var parameter = parameters.FirstOrDefault(p =>
-                ToggleTreeCompat.AlwaysTrueParamName.IsMatch(p.name) && p.defaultBool);
-            if (parameter == null) {
-                throw new Exception("FuryPlusPlus sub-8-bit packing: always-true parameter not found.");
-            }
-            return parameter.name;
-        }
-
         private static string TitleId(int batchNum, int indexBitCount) {
             var syncId = batchNum + 1;
             return string.Concat(Enumerable.Range(0, indexBitCount)
@@ -411,7 +396,7 @@ namespace FuryPlusPlus {
             object compressorLayer,
             object machine,
             List<PairPlan> plans,
-            string trueParam
+            string oneParam
         ) {
             foreach (var group in plans.GroupBy(plan => plan.BatchNum)) {
                 var wanted = group.First().ReceiveDriver;
@@ -472,9 +457,10 @@ namespace FuryPlusPlus {
                 ToggleTreeCompat.TrDestinationState.SetValue(advance, decodeState);
                 ToggleTreeCompat.TrHasExitTime.SetValue(advance, false);
                 ToggleTreeCompat.TrDuration.SetValue(advance, 0f);
+                // VFAvatarController.Always(), as VRCFury emits it since 1.1437.0.
                 ToggleTreeCompat.TrConditions.SetValue(advance, new[] {
                     new AnimatorCondition {
-                        mode = AnimatorConditionMode.If, threshold = 0, parameter = trueParam
+                        mode = AnimatorConditionMode.Greater, threshold = 0, parameter = oneParam
                     }
                 });
                 receiveTransitions.Add(advance);
@@ -502,13 +488,14 @@ namespace FuryPlusPlus {
         //      factory prune, and serialized with the controller like stock's states) ----
 
         private static string MakeAap(object controller, string name, float def) {
-            var aap = CompressorCompat.MakeAap.Invoke(controller, new object[] { name, def, true });
-            return (string)vfaApName.Invoke(aap, null);
+            var aap = ReflectionUtils.InvokeUnwrapped(CompressorCompat.CreateUniqueFloat, controller,
+                new[] { name, ToggleTreeCompat.FloatOrBool(def) });
+            return ToggleTreeCompat.ParamName(aap);
         }
 
         private static string GetOneParamName(object controller) {
-            var one = controllerManagerOne.Invoke(controller, null);
-            return (string)ToggleTreeCompat.VfaParamName.Invoke(one, null);
+            var one = ReflectionUtils.InvokeUnwrapped(ToggleTreeCompat.ControllerOne, controller, null);
+            return ToggleTreeCompat.ParamName(one);
         }
 
         /** An in-memory VFClip writing one or more AAPs at a constant value. */

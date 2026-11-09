@@ -39,7 +39,9 @@ namespace FuryPlusPlus {
          * precise message from its own Install instead of failing to compile.
          */
         internal static MethodInfo GetRaw;
-        internal static MethodInfo NewLayer;                   // ControllerManager.NewLayer(string, int)
+        internal static Type AvatarControllerType;             // VF.Utils.VFAvatarController
+        internal static MethodInfo NewLayer;                   // VFAvatarController.NewLayer(string, int)
+        internal static MethodInfo ControllerOne;              // VFAvatarController.One() → VFAParam
         internal static MethodInfo NewState;                   // VFLayer.NewState(string)
         internal static MethodInfo StateWithAnimation;         // VFState.WithAnimation(VFMotion)
         internal static MethodInfo LayerRemove;                // VFLayer.Remove()
@@ -85,8 +87,12 @@ namespace FuryPlusPlus {
         internal static MethodInfo MotionEvaluate;             // VFMotion.EvaluateMotion(float)
         internal static MethodInfo HasValidBinding;            // ValidateBindingsService.HasValidBinding(VFMotion, VFGameObject)
         internal static FieldInfo LayerAvatarObject;           // LayerToTreeService.avatarObject
-        internal static MethodInfo ControllerGetParam;         // VFController.GetParam(string)
-        internal static PropertyInfo ControllerParameters;     // VFController.parameters
+        // VRCFury 1.1437.0 replaced the AnimatorControllerParameter list with VFAParam
+        // entries keyed by name. FindParameter/ParametersOf convert back through
+        // VFAParam.Save(), so the conversion modules keep reading Unity's parameter type.
+        internal static MethodInfo ControllerTryGetParam;      // VFController.TryGetParam(string, out VFAParam)
+        internal static PropertyInfo ControllerParameters;     // VFController.parameters → VFAParam[]
+        internal static MethodInfo ParamSave;                  // VFAParam.Save() → AnimatorControllerParameter
         internal static Type ClipsIteratorType;                // AnimatorIterator+Clips
         internal static MethodInfo ClipsFromMotion;            // AnimatorIterator.Clips.From(VFMotion)
         private static MethodInfo clipCreate;                  // VFClip.Create(string)
@@ -120,11 +126,13 @@ namespace FuryPlusPlus {
         internal static MethodInfo BehavioursAdd;              // VFBehaviourContainer.AddBehaviour<T>(init)
         internal static MethodInfo BehavioursGet;              // VFBehaviourContainer.GetBehaviours<T>()
 
-        // BlendtreeMath.Equals(VFAFloat, float, string, float) → VFAFloatBool { create }
+        // BlendtreeMath.Equals(VFAParam, float, string, float) → Condition { create }
         internal static MethodInfo MathEquals;
         internal static PropertyInfo FloatBoolCreate;
-        internal static ConstructorInfo VfaFloatCtor;          // VFAFloat(string, float)
-        internal static MethodInfo VfaParamName;               // VFAParam.Name()
+        internal static ConstructorInfo VfaParamCtor;          // VFAParam(string, AnimatorControllerParameterType)
+        internal static MethodInfo VfaSetDefault;              // VFAParam.SetDefault(FloatOrBool)
+        internal static MethodInfo FloatOrBoolFromFloat;       // FloatOrBool.op_Implicit(float)
+        internal static PropertyInfo VfaParamName;             // VFAParam.name
 
         // Smoothing (fade module only)
         internal static MethodInfo Smooth;                     // SmoothingService.Smooth(tree,name,target,seconds,accel,min,max)
@@ -132,9 +140,12 @@ namespace FuryPlusPlus {
         // VRC built-in globals that may legitimately exceed 1 as ints (mirror of stock guard)
         internal static ISet<string> VrchatGlobalParams;
 
-        /** VRCFury's always-true bool parameter naming convention (VF_<n>_True). */
-        internal static readonly System.Text.RegularExpressions.Regex AlwaysTrueParamName =
-            new System.Text.RegularExpressions.Regex(@"^VF_\d+_True$");
+        /**
+         * VRCFury's always-one float parameter naming convention (VF_<n>_One). Since 1.1437.0
+         * VFAvatarController.Always() is `One > 0`; the VF_<n>_True bool it used before is gone.
+         */
+        internal static readonly System.Text.RegularExpressions.Regex AlwaysOneParamName =
+            new System.Text.RegularExpressions.Regex(@"^VF_\d+_One$");
 
         internal static void EnsureResolved() {
             if (resolved) return;
@@ -146,7 +157,8 @@ namespace FuryPlusPlus {
 
             var controllersServiceType = ReflectionUtils.FindType("VF.Service.ControllersService");
             var vfControllerType = ReflectionUtils.FindType("VF.Utils.Controller.VFController");
-            var controllerManagerType = ReflectionUtils.FindType("VF.Utils.ControllerManager");
+            // VRCFury 1.1437.0 renamed ControllerManager to VFAvatarController.
+            AvatarControllerType = ReflectionUtils.FindType("VF.Utils.VFAvatarController");
             var layerType = ReflectionUtils.FindType("VF.Utils.Controller.VFLayer");
             LayerType = layerType;
             var stateMachineType = ReflectionUtils.FindType("VF.Utils.Controller.VFStateMachine");
@@ -165,8 +177,8 @@ namespace FuryPlusPlus {
             var tree1DType = ReflectionUtils.FindType("VF.Utils.VFBlendTree1D");
             var treeBaseType = ReflectionUtils.FindType("VF.Utils.VFBlendTree");
             var mathType = ReflectionUtils.FindType("VF.Utils.BlendtreeMath");
-            var floatBoolType = ReflectionUtils.FindType("VF.Utils.BlendtreeMath+VFAFloatBool");
-            var vfaFloatType = ReflectionUtils.FindType("VF.Utils.Controller.VFAFloat");
+            var floatBoolType = ReflectionUtils.FindType("VF.Utils.BlendtreeMath+Condition");
+            var floatOrBoolType = ReflectionUtils.FindType("VF.Utils.FloatOrBool");
             var vfaParamType = ReflectionUtils.FindType("VF.Utils.Controller.VFAParam");
             var smoothingType = ReflectionUtils.FindType("VF.Service.SmoothingService");
             var fullControllerType = ReflectionUtils.FindType("VF.Feature.FullControllerBuilder");
@@ -184,8 +196,11 @@ namespace FuryPlusPlus {
             // Expected to be null at this pin; see the field comment.
             GetRaw = ReflectionUtils.FindUniqueMethod(vfControllerType, "GetRaw",
                 method => method.GetParameters().Length == 0);
-            NewLayer = controllerManagerType == null ? null : ReflectionUtils.FindUniqueMethod(
-                controllerManagerType, "NewLayer", method => method.GetParameters().Length == 2);
+            NewLayer = AvatarControllerType == null ? null : ReflectionUtils.FindUniqueMethod(
+                AvatarControllerType, "NewLayer", method => method.GetParameters().Length == 2);
+            ControllerOne = AvatarControllerType == null ? null : ReflectionUtils.FindUniqueMethod(
+                AvatarControllerType, "One", method => method.GetParameters().Length == 0
+                                                       && method.ReturnType == vfaParamType);
             NewState = ReflectionUtils.FindUniqueMethod(layerType, "NewState",
                 method => method.GetParameters().Length == 1);
             StateWithAnimation = stateType == null ? null : ReflectionUtils.FindUniqueMethod(
@@ -257,10 +272,16 @@ namespace FuryPlusPlus {
             LayerAvatarObject = layerToTreeType?.GetField("avatarObject", inst);
             clipCreate = clipType == null ? null : ReflectionUtils.FindUniqueMethod(
                 clipType, "Create", method => method.IsStatic && method.GetParameters().Length == 1);
-            ControllerGetParam = ReflectionUtils.FindMethodWithSignature(
-                vfControllerType, "GetParam",
-                typeof(UnityEngine.AnimatorControllerParameter), typeof(string));
-            ControllerParameters = vfControllerType.GetProperty("parameters", inst);
+            if (vfaParamType != null) {
+                ControllerTryGetParam = ReflectionUtils.FindMethodWithSignature(
+                    vfControllerType, "TryGetParam",
+                    typeof(bool), typeof(string), vfaParamType.MakeByRefType());
+                var parameters = vfControllerType.GetProperty("parameters", inst);
+                ControllerParameters = parameters?.PropertyType == vfaParamType.MakeArrayType() ? parameters : null;
+                ParamSave = ReflectionUtils.FindUniqueMethod(vfaParamType, "Save",
+                    method => !method.IsStatic && method.GetParameters().Length == 0
+                              && method.ReturnType == typeof(UnityEngine.AnimatorControllerParameter));
+            }
             ClipsIteratorType = ReflectionUtils.FindType("VF.Utils.AnimatorIterator+Clips");
             ClipsFromMotion = ClipsIteratorType == null ? null : ReflectionUtils.FindUniqueMethod(
                 ClipsIteratorType, "From", method => method.GetParameters().Length == 1
@@ -324,15 +345,28 @@ namespace FuryPlusPlus {
                     method => method.IsGenericMethodDefinition && method.GetParameters().Length == 0);
             }
 
-            if (mathType != null && vfaFloatType != null) {
+            if (mathType != null && vfaParamType != null) {
                 MathEquals = ReflectionUtils.FindUniqueMethod(mathType, "Equals",
                     method => method.IsStatic && method.GetParameters().Length == 4
-                              && method.GetParameters()[0].ParameterType == vfaFloatType);
-                VfaFloatCtor = vfaFloatType.GetConstructor(new[] { typeof(string), typeof(float) });
+                              && method.GetParameters()[0].ParameterType == vfaParamType
+                              && method.GetParameters()[1].ParameterType == typeof(float)
+                              && method.ReturnType == floatBoolType);
             }
             FloatBoolCreate = floatBoolType?.GetProperty("create", any);
-            VfaParamName = vfaParamType == null ? null : ReflectionUtils.FindUniqueMethod(
-                vfaParamType, "Name", method => method.GetParameters().Length == 0);
+            if (vfaParamType != null) {
+                VfaParamCtor = vfaParamType.GetConstructor(inst, null,
+                    new[] { typeof(string), typeof(UnityEngine.AnimatorControllerParameterType) }, null);
+                VfaSetDefault = floatOrBoolType == null ? null : ReflectionUtils.FindMethodWithSignature(
+                    vfaParamType, "SetDefault", typeof(void), floatOrBoolType);
+                VfaParamName = vfaParamType.GetProperty("name", inst);
+                if (VfaParamName?.PropertyType != typeof(string)) VfaParamName = null;
+            }
+            FloatOrBoolFromFloat = floatOrBoolType?
+                .GetMethods(BindingFlags.Static | BindingFlags.Public)
+                .SingleOrDefault(method => method.Name == "op_Implicit"
+                                           && method.ReturnType == floatOrBoolType
+                                           && method.GetParameters().Length == 1
+                                           && method.GetParameters()[0].ParameterType == typeof(float));
 
             Smooth = smoothingType == null ? null : ReflectionUtils.FindUniqueMethod(
                 smoothingType, "Smooth", method => method.GetParameters().Length == 7);
@@ -349,7 +383,7 @@ namespace FuryPlusPlus {
             EnsureResolved();
             ReflectionUtils.Demand(GetFx, "ControllersService.GetFx()");
             ReflectionUtils.Demand(GetLayers, "VFController.GetLayers()");
-            ReflectionUtils.Demand(NewLayer, "ControllerManager.NewLayer(string, int)");
+            ReflectionUtils.Demand(NewLayer, "VFAvatarController.NewLayer(string, int)");
             ReflectionUtils.Demand(NewState, "VFLayer.NewState(string)");
             ReflectionUtils.Demand(StateWithAnimation, "VFState.WithAnimation(VFMotion)");
             ReflectionUtils.Demand(LayerRemove, "VFLayer.Remove()");
@@ -386,7 +420,7 @@ namespace FuryPlusPlus {
                 HasValidBinding,
                 "ValidateBindingsService.HasValidBinding(VFMotion, VFGameObject)");
             ReflectionUtils.Demand(LayerAvatarObject, "LayerToTreeService.avatarObject");
-            ReflectionUtils.Demand(ControllerGetParam, "VFController.GetParam(string)");
+            DemandParameterLookup();
             ReflectionUtils.Demand(ClipsFromMotion, "AnimatorIterator.Clips.From(VFMotion)");
             ReflectionUtils.Demand(clipCreate, "VFClip.Create(name)");
             ReflectionUtils.Demand(DirectCreate, "VFBlendTreeDirect.Create(string)");
@@ -395,14 +429,59 @@ namespace FuryPlusPlus {
             ReflectionUtils.Demand(Tree1DCreate, "VFBlendTree1D.Create(string, string)");
             ReflectionUtils.Demand(Tree1DAdd, "VFBlendTree1D.Add(float, VFMotion)");
             ReflectionUtils.Demand(TreeToMotionOp, "VFBlendTree op_Implicit(VFMotion)");
-            ReflectionUtils.Demand(MathEquals, "BlendtreeMath.Equals(VFAFloat, float, string, float)");
-            ReflectionUtils.Demand(FloatBoolCreate, "BlendtreeMath.VFAFloatBool.create");
-            ReflectionUtils.Demand(VfaFloatCtor, "VFAFloat(string, float)");
-            ReflectionUtils.Demand(VfaParamName, "VFAParam.Name()");
+            ReflectionUtils.Demand(MathEquals, "BlendtreeMath.Equals(VFAParam, float, string, float)");
+            ReflectionUtils.Demand(FloatBoolCreate, "BlendtreeMath.Condition.create");
+            DemandDetachedParam();
             ReflectionUtils.Demand(VrchatGlobalParams, "FullControllerBuilder.VRChatGlobalParams");
         }
 
+        /** VFController.TryGetParam + VFAParam.Save, behind FindParameter/ParametersOf. */
+        internal static void DemandParameterLookup() {
+            EnsureResolved();
+            ReflectionUtils.Demand(ControllerTryGetParam, "VFController.TryGetParam(string, out VFAParam)");
+            ReflectionUtils.Demand(ControllerParameters, "VFController.parameters (VFAParam[])");
+            ReflectionUtils.Demand(ParamSave, "VFAParam.Save()");
+        }
+
+        /** The members MakeVfaFloat and ParamName need. */
+        internal static void DemandDetachedParam() {
+            EnsureResolved();
+            ReflectionUtils.Demand(VfaParamCtor, "VFAParam(string, AnimatorControllerParameterType)");
+            ReflectionUtils.Demand(VfaSetDefault, "VFAParam.SetDefault(FloatOrBool)");
+            ReflectionUtils.Demand(FloatOrBoolFromFloat, "FloatOrBool.op_Implicit(float)");
+            ReflectionUtils.Demand(VfaParamName, "VFAParam.name");
+        }
+
         // ---- invocation wrappers ----
+
+        /**
+         * The controller's parameter as Unity would save it, or null when it is not declared.
+         * A fresh copy: writing to it never reaches the controller.
+         */
+        internal static UnityEngine.AnimatorControllerParameter FindParameter(object controller, string name) {
+            if (name == null) return null;
+            var args = new object[] { name, null };
+            if (!(bool)ReflectionUtils.InvokeUnwrapped(ControllerTryGetParam, controller, args)) return null;
+            return (UnityEngine.AnimatorControllerParameter)ReflectionUtils.InvokeUnwrapped(ParamSave, args[1], null);
+        }
+
+        /** Every declared parameter, as Unity would save it (fresh copies). */
+        internal static UnityEngine.AnimatorControllerParameter[] ParametersOf(object controller) {
+            return ((IEnumerable)ControllerParameters.GetValue(controller))
+                .Cast<object>()
+                .Select(parameter => (UnityEngine.AnimatorControllerParameter)
+                    ReflectionUtils.InvokeUnwrapped(ParamSave, parameter, null))
+                .ToArray();
+        }
+
+        /** VFAParam.name */
+        internal static string ParamName(object vfaParam) {
+            return (string)VfaParamName.GetValue(vfaParam);
+        }
+
+        internal static object FloatOrBool(float value) {
+            return FloatOrBoolFromFloat.Invoke(null, new object[] { value });
+        }
         internal static void DemandStatePlayback() {
             ReflectionUtils.Demand(StateSpeed, "VFState.speed");
             ReflectionUtils.Demand(StateMirror, "VFState.mirror");
@@ -446,8 +525,17 @@ namespace FuryPlusPlus {
             return LayerAvatarObject.GetValue(layerToTreeService);
         }
 
+        /**
+         * A float VFAParam not attached to any controller: the stand-in VRCFury's own
+         * `new VFAFloat(name, def)` was before 1.1437.0. Only its name and default are read
+         * by BlendtreeMath and SmoothingService.
+         */
         internal static object MakeVfaFloat(string name, float def) {
-            return VfaFloatCtor.Invoke(new object[] { name, def });
+            var parameter = VfaParamCtor.Invoke(new object[] {
+                name, UnityEngine.AnimatorControllerParameterType.Float
+            });
+            ReflectionUtils.InvokeUnwrapped(VfaSetDefault, parameter, new[] { FloatOrBool(def) });
+            return parameter;
         }
 
         /** BlendtreeMath.Equals(param, threshold).create(whenTrue, whenFalse) */

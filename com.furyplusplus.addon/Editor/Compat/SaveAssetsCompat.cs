@@ -76,7 +76,7 @@ namespace FuryPlusPlus {
             EnsureResolved();
             ReflectionUtils.Demand(
                 SaveAssetsRunTransaction,
-                "SaveAssetsService.Run(IEnumerable<ControllerManager>)");
+                "SaveAssetsService.Run(IEnumerable<VFAvatarController>)");
             ReflectionUtils.Demand(SaveAsset2, "VRCFuryAssetDatabase.SaveAsset(obj, fullPath)");
             ReflectionUtils.Demand(SaveAsset3, "VRCFuryAssetDatabase.SaveAsset(obj, dir, filename)");
             ReflectionUtils.Demand(AttachAsset, "VRCFuryAssetDatabase.AttachAsset(obj, parent)");

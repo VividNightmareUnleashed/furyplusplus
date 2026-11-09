@@ -222,9 +222,7 @@ namespace FuryPlusPlus {
         }
 
         internal static AnimatorControllerParameter FindParam(Snapshot snapshot, string name) {
-            return ReflectionUtils.InvokeUnwrapped(
-                ToggleTreeCompat.ControllerGetParam, snapshot.Fx, new object[] { name })
-                as AnimatorControllerParameter;
+            return ToggleTreeCompat.FindParameter(snapshot.Fx, name);
         }
 
         internal static bool ConditionsEqual(AnimatorCondition a, AnimatorCondition b) {
