@@ -57,7 +57,7 @@ namespace FuryPlusPlus {
         internal static MethodInfo GetDefaultLayer;            // FixWriteDefaultsService.GetDefaultLayer()
         internal static MethodInfo GetDefaultClip;             // FixWriteDefaultsService.GetDefaultClip()
         internal static MethodInfo OptimizeLayer;              // LayerToTreeService.OptimizeLayer(...)
-        internal static MethodInfo Optimize;                   // LayerToTreeService.Optimize(...)
+        internal static MethodInfo Make0LengthClipForState;    // LayerToTreeService.Make0LengthClipForState(layer, state)
 
         // VFStateMachine
         internal static PropertyInfo SmStates;                 // .states → IReadOnlyList<VFState>
@@ -226,8 +226,8 @@ namespace FuryPlusPlus {
                 fixWdType, "GetDefaultClip", method => method.GetParameters().Length == 0);
             OptimizeLayer = layerToTreeType == null ? null : ReflectionUtils.FindUniqueMethod(
                 layerToTreeType, "OptimizeLayer", method => method.GetParameters().Length == 4);
-            Optimize = layerToTreeType == null ? null : ReflectionUtils.FindUniqueMethod(
-                layerToTreeType, "Optimize", method => method.GetParameters().Length == 4);
+            Make0LengthClipForState = layerToTreeType == null ? null : ReflectionUtils.FindUniqueMethod(
+                layerToTreeType, "Make0LengthClipForState", method => method.GetParameters().Length == 2);
 
             if (stateMachineType != null) {
                 SmStates = stateMachineType.GetProperty("states", inst);

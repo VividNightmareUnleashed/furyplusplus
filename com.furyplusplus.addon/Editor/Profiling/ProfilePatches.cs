@@ -115,7 +115,11 @@ namespace FuryPlusPlus {
             ("VF.Builder.MeshBaker", new[] { "BakeMesh" }),
             ("VF.Inspector.VRCFuryHapticPlugEditor", new[] { "GetRenderers" }),
             ("VF.Builder.Haptics.TpsConfigurer", new[] { "HasDpsOrTpsMaterial" }),
-            ("VF.Builder.Haptics.PlugRendererFinder", new[] { "GetAutoRenderer" }),
+            // VRCFury 1.1443.0+: SPS upgrading split into SpsPlugUpgrader/SpsSocketUpgrader,
+            // TpsConfigurer's probe moved to TpsUtils. Missing targets are skipped.
+            ("VF.Builder.Haptics.SpsPlugUpgrader", new[] { "Discover" }),
+            ("VF.Builder.Haptics.TpsUtils", new[] { "HasDpsOrTpsMaterial" }),
+            ("VF.Builder.Haptics.PlugRendererFinder", new[] { "GetAutoRenderer", "GetRenderers" }),
             ("VF.Builder.Haptics.PlugMaskGenerator", new[] { "GetMask" })
         };
 

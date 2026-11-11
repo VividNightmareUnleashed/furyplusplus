@@ -80,7 +80,7 @@ VRCFury and the VRChat SDK are not updated. See the
    present, but the package should not stay installed.)
 3. Add the package through the Creator Companion or by hand. Both methods are described below.
 4. Check that the installed combination is approved in FuryPlusPlus settings. Once approved and reloaded, the Console should report
-   `[FuryPlusPlus] Ready: 30/30 modules installed for VRCFury 1.1427.0, 15 superseded`.
+   `[FuryPlusPlus] Ready: 29/29 modules installed for VRCFury 1.1454.0, 16 superseded`.
 
 ### Via the VRChat Creator Companion (recommended)
 
@@ -121,7 +121,8 @@ gives an immediate stock-VRCFury control run.
   of whole-avatar scans with per-phase indexes.
 - **Armature debug-component suppression**: avoids creating diagnostic components on merged
   bones during preview builds; upload output is unchanged.
-- **Covered SPS mesh probe skip** and **SPS material probe cache**.
+- **SPS material probe cache**: remembers which materials are DPS or TPS materials between
+  bakes, for materials that have not changed.
 - **Compressor memoization**: reuses repeated parameter and menu queries within a bake.
 - **Fast blendshape optimizer bake**: one-pass rewrite of Blendshape Optimizer's bake step, with
   a default-on fix for VRCFury's multi-frame interpolation frame selection (stock behavior
@@ -129,7 +130,7 @@ gives an immediate stock-VRCFury control run.
 - **Play-mode pass skipping**: passes that only matter for uploads (mipmap streaming fix, menu
   icon textures, final validation) are skipped during play-mode test builds.
 
-Fifteen older speed modules are retired because VRCFury now handles their work natively.
+Sixteen older speed modules are retired because VRCFury now handles their work natively.
 Their settings remain visible, struck through and linked to the upstream replacement.
 
 ### Output quality modules (change bake output)
