@@ -12,7 +12,8 @@ namespace FuryPlusPlus {
      * READS (animator conditions, blendtree parameters, state motion-time/speed/mirror/
      * cycle slots, and VRCAvatarParameterDriver Copy SOURCES — the read VRCFury's own
      * unused-param detection misses) versus merely writes (drivers, menu controls).
-     * Dynamics-driven names (PhysBone/Contact parameter outputs) are collected separately.
+     * Dynamics-driven names (PhysBone, contact receiver and VRC Raycast outputs, including
+     * advanced contact parameters) are collected separately.
      */
     internal sealed class ParamUsageIndex {
         internal readonly HashSet<string> Reads = new HashSet<string>();
@@ -211,20 +212,11 @@ namespace FuryPlusPlus {
             }
         }
 
-        // PhysBones/Contacts live in precompiled dynamics DLLs; reach them by reflection so
-        // the asmdef needs no extra precompiled references.
-        private static readonly string[] PhysBoneSuffixes =
-            { "_IsGrabbed", "_IsPosed", "_Angle", "_Stretch", "_Squish" };
-
+        // PhysBones and contacts live in precompiled dynamics DLLs, so AvatarPipelineCompat
+        // reaches them (and VRCRaycast) by reflection; the asmdef needs no extra references.
         private void CollectDynamics(GameObject avatarRoot) {
             foreach (var component in avatarRoot.GetComponentsInChildren<Component>(true)) {
-                if (!AvatarPipelineCompat.TryGetDynamicsParameter(
-                        component, out var parameter, out var isPhysBone)) continue;
-                if (!isPhysBone) {
-                    DynamicsParams.Add(parameter);
-                    continue;
-                }
-                foreach (var suffix in PhysBoneSuffixes) DynamicsParams.Add(parameter + suffix);
+                DynamicsParams.UnionWith(AvatarPipelineCompat.GetDynamicsParameterNames(component));
             }
         }
     }

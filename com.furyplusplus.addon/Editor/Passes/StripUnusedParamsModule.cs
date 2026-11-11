@@ -20,7 +20,7 @@ namespace FuryPlusPlus {
      */
     internal sealed class StripUnusedParamsModule : Module<StripUnusedParamsModule> {
         internal static readonly ModuleOption KeepDynamicsParams = new ModuleOption(
-            "keepDynamicsParams", "Keep PhysBone/Contact parameters synced", false,
+            "keepDynamicsParams", "Keep PhysBone/Contact/Raycast parameters synced", false,
             "By default unread dynamics outputs are un-synced too (VRCFury's own guidance). " +
             "Enable if an external system relies on receiving them remotely.");
 

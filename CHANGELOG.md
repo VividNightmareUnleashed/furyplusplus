@@ -21,6 +21,14 @@ which removed methods that two FuryPlusPlus modules depended on.
   module did. The toggle stays in settings, struck through.
 - **Profiler:** the detailed profile also times VRCFury's new SPS plug discovery and the
   moved material probe.
+- **Dynamics parameters fix:** the synced-parameter passes now know every parameter that
+  contact receivers and VRC Raycasts write. Before, they only knew a receiver's main
+  parameter, so they missed the advanced contact parameters of VRChat SDK 3.10.6 (such as
+  `_SenderType` and `_CollisionTag_<tag>`, which VRCFury now uses for SPS) and the
+  raycast `_Hit`, `_Ratio` and `_Distance` outputs. Int narrowing could turn a synced
+  `_SenderType` Int into a Bool when a menu also wrote 0 or 1 to it, and the "keep
+  dynamics" option of the unused-parameter strip did not keep these outputs synced.
+  This affected every earlier release on SDK 3.10.6.
 
 ## 1.3.3 (2026-11-09)
 
