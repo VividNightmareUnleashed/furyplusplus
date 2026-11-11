@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.3.4 (2026-11-11)
+
+Restores full optimization coverage on VRCFury 1.1443.0 and later. VRCFury 1.1443.0
+reworked SPS plug upgrading and rewrote how it converts two-state layers into blend trees,
+which removed methods that two FuryPlusPlus modules depended on.
+
+- **One-sided blendtree toggles:** VRCFury 1.1443.0 removed the conversion step this
+  module hooked, so it no longer installed. It now drops a side where VRCFury reads each
+  state's motion for the conversion, which works with both the old and the new
+  conversion. Because the new conversion has no fixed on and off side, the module drops
+  whichever side only writes resting values, at most one per layer. It also applies to
+  the layers with combined conditions that VRCFury can now convert. A side is kept when
+  another state in the layer has no motion, so the layer stays convertible.
+- **SPS material probe cache:** VRCFury 1.1443.0 moved the DPS/TPS material probe from
+  `TpsConfigurer` to `TpsUtils` with the same test. The cache now finds it there, and
+  still finds it in `TpsConfigurer` on earlier releases.
+- **Covered SPS mesh probe skip:** superseded. VRCFury 1.1443.0 now skips renderers that
+  a plug already covers before it bakes their mesh to measure them, which is what this
+  module did. The toggle stays in settings, struck through.
+- **Profiler:** the detailed profile also times VRCFury's new SPS plug discovery and the
+  moved material probe.
+
 ## 1.3.3 (2026-11-09)
 
 Restores full optimization coverage on VRCFury 1.1437.0 and later. VRCFury 1.1437.0 moved
