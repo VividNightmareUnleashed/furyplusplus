@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 15,
+  "revision": 16,
   "approved": [
     {
       "furyPlusPlus": "1.3.0",
@@ -17,6 +17,10 @@
     {
       "furyPlusPlus": "1.3.3",
       "vrcfury": ["1.1442.0"]
+    },
+    {
+      "furyPlusPlus": "1.3.4",
+      "vrcfury": ["1.1463.0"]
     }
   ]
 }
