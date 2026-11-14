@@ -3,7 +3,6 @@ using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
-using VRC.SDK3.Avatars.Components;
 
 namespace FuryPlusPlus.Tests.Editor {
     /**
@@ -11,7 +10,8 @@ namespace FuryPlusPlus.Tests.Editor {
      * renderers before probing their size), moved TpsConfigurer.HasDpsOrTpsMaterial to
      * TpsUtils, and rewrote LayerToTreeService's two-state conversion without the old
      * Optimize(condition, on, off) step. These run against the installed VRCFury and are
-     * ignored when it is older than 1.1443.0.
+     * ignored when it is older than 1.1443.0. VRCFury 1.1459.0 also gave
+     * VFClip.GetAllCurves an optional filter parameter.
      */
     public class SpsUpgradeAndLayerToTreeTests {
         private const BindingFlags Any = BindingFlags.Instance | BindingFlags.Static |
@@ -96,23 +96,44 @@ namespace FuryPlusPlus.Tests.Editor {
             Assert.IsFalse(OffSideEliminationPatch.OtherStatesHaveMotions(layer, only));
         }
 
+        [Test]
+        public void ClipCurvesResolveWithOrWithoutTheFilterParameter() {
+            // VRCFury 1.1459.0 changed GetAllCurves() to GetAllCurves(filter = null).
+            ClipCurveCompat.DemandCore();
+            var parameters = ClipCurveCompat.ClipGetAllCurves.GetParameters();
+            Assert.LessOrEqual(parameters.Length, 1);
+            if (parameters.Length == 1) Assert.IsTrue(parameters[0].IsOptional);
+
+            var curves = ClipCurveCompat.AllCurvesOf(ToggleTreeCompat.NewEmptyClip("curves"));
+            Assert.NotNull(curves);
+            Assert.AreEqual(0, curves.Length);
+        }
+
+        [Test]
+        public void ClipIteratorResolvesTheInheritedFrom() {
+            // Since VRCFury 1.1443.0 AnimatorIterator.Clips inherits From(VFMotion) from
+            // MotionIterator<VFClip>. The fade and separate-local toggles depend on it.
+            RequireSps3();
+            ToggleTreeCompat.EnsureResolved();
+            ReflectionUtils.Demand(ToggleTreeCompat.ClipsFromMotion, "AnimatorIterator.Clips.From(VFMotion)");
+            var clip = ToggleTreeCompat.NewEmptyClip("iterated");
+            var clips = ((System.Collections.IEnumerable)ReflectionUtils.InvokeUnwrapped(
+                ToggleTreeCompat.ClipsFromMotion, ToggleTreeCompat.NewClipsIterator(), new[] { clip }))
+                .Cast<object>().ToList();
+            Assert.AreEqual(1, clips.Count);
+            Assert.AreSame(clip, clips[0]);
+        }
+
         private static object NewLayer() {
+            // A plain VFController: VFAvatarController.NewLayer also needs the build's
+            // LayerSourceService, and these checks only look at the layer's states.
             var controllerType = ReflectionUtils.FindType("VF.Utils.Controller.VFController");
             var controller = controllerType.GetMethod("Create", BindingFlags.Static | BindingFlags.Public)
                 .Invoke(null, new object[] { "FuryPlusPlus test" });
-            var avatarControllerType = ReflectionUtils.FindType("VF.Utils.VFAvatarController");
-            var constructor = avatarControllerType.GetConstructors(Any)
-                .Single(ctor => ctor.GetParameters().Length == 7);
-            var fx = constructor.Invoke(new object[] {
-                controller,
-                VRCAvatarDescriptor.AnimLayerType.FX,
-                (Func<int>)(() => 7),
-                (Func<string>)(() => ""),
-                (Func<string, string>)(name => "VF7_" + name),
-                null,
-                null
-            });
-            return ReflectionUtils.InvokeUnwrapped(ToggleTreeCompat.NewLayer, fx, new object[] { "Toggle", -1 });
+            var newLayer = ReflectionUtils.FindUniqueMethod(controllerType, "NewLayer",
+                method => method.GetParameters().Length == 2);
+            Assert.NotNull(newLayer, "VFController.NewLayer(name, insertAt)");
+            return ReflectionUtils.InvokeUnwrapped(newLayer, controller, new object[] { "Toggle", -1 });
         }
 
         private static object NewState(object layer, string name) {

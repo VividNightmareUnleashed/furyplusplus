@@ -286,9 +286,14 @@ namespace FuryPlusPlus {
                     vfControllerType, "GetOrCreateFloat", vfaParamType, typeof(string), floatOrBoolType);
             }
             ClipsIteratorType = ReflectionUtils.FindType("VF.Utils.AnimatorIterator+Clips");
+            // Since VRCFury 1.1443.0 Clips inherits From(VFMotion) from MotionIterator<VFClip>
+            // instead of declaring it, so include inherited members (one per override chain).
             ClipsFromMotion = ClipsIteratorType == null ? null : ReflectionUtils.FindUniqueMethod(
-                ClipsIteratorType, "From", method => method.GetParameters().Length == 1
-                    && method.GetParameters()[0].ParameterType == MotionType);
+                ClipsIteratorType, "From",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                method => !method.ContainsGenericParameters
+                          && method.GetParameters().Length == 1
+                          && method.GetParameters()[0].ParameterType == MotionType);
 
             if (directType != null) {
                 DirectCreate = ReflectionUtils.FindUniqueMethod(directType, "Create",

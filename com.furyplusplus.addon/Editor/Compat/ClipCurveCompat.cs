@@ -29,8 +29,9 @@ namespace FuryPlusPlus {
 
         // ---- VFClip (all instance members now) ----
         internal static Type ClipType;                      // VF.Utils.Controller.VFClip
-        internal static MethodInfo ClipGetAllCurves;        // VFClip.GetAllCurves()
-        internal static MethodInfo ClipGetAllBindings;      // VFClip.GetAllBindings()
+        internal static MethodInfo ClipGetAllCurves;        // VFClip.GetAllCurves(filter = null) since 1.1459.0
+        private static object[] clipGetAllCurvesArgs;       // null, or { null } for the optional filter
+        internal static MethodInfo ClipGetAllBindings;     // VFClip.GetAllBindings()
         internal static MethodInfo ClipSetCurves;           // VFClip.SetCurves(IEnumerable<(VFBinding, curve)>)
         internal static MethodInfo ClipIsProxyClip;         // VFClip.IsProxyClip()
         internal static MethodInfo ClipGetUseOriginalUserClip; // VFClip.GetUseOriginalUserClip(VFGameObject)
@@ -88,8 +89,15 @@ namespace FuryPlusPlus {
 
             ClipType = ReflectionUtils.FindType("VF.Utils.Controller.VFClip");
             if (ClipType != null) {
+                // VRCFury 1.1459.0 added an optional binding filter; null keeps every curve.
                 ClipGetAllCurves = ReflectionUtils.FindUniqueMethod(ClipType, "GetAllCurves",
-                    method => method.GetParameters().Length == 0);
+                    method => method.GetParameters().Length == 0
+                              || (method.GetParameters().Length == 1
+                                  && method.GetParameters()[0].IsOptional
+                                  && !method.GetParameters()[0].ParameterType.IsValueType));
+                clipGetAllCurvesArgs = ClipGetAllCurves?.GetParameters().Length == 1
+                    ? new object[] { null }
+                    : null;
                 ClipGetAllBindings = ReflectionUtils.FindUniqueMethod(ClipType, "GetAllBindings",
                     method => method.GetParameters().Length == 0);
                 ClipSetCurves = ReflectionUtils.FindUniqueMethod(ClipType, "SetCurves",
@@ -285,7 +293,7 @@ namespace FuryPlusPlus {
         // ---- VFClip ----
 
         internal static Array AllCurvesOf(object clip) {
-            return (Array)ClipGetAllCurves.Invoke(clip, null);
+            return (Array)ClipGetAllCurves.Invoke(clip, clipGetAllCurvesArgs);
         }
 
         internal static Array AllBindingsOf(object clip) {
