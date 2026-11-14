@@ -1,10 +1,11 @@
 # Changelog
 
-## 1.3.4 (2026-11-11)
+## 1.3.4 (2026-11-14)
 
 Restores full optimization coverage on VRCFury 1.1443.0 and later. VRCFury 1.1443.0
 reworked SPS plug upgrading and rewrote how it converts two-state layers into blend trees,
-which removed methods that two FuryPlusPlus modules depended on.
+and VRCFury 1.1459.0 changed how clip curves are read. Both changed or removed methods
+that FuryPlusPlus modules depended on.
 
 - **One-sided blendtree toggles:** VRCFury 1.1443.0 removed the conversion step this
   module hooked, so it no longer installed. It now drops a side where VRCFury reads each
@@ -13,6 +14,14 @@ which removed methods that two FuryPlusPlus modules depended on.
   whichever side only writes resting values, at most one per layer. It also applies to
   the layers with combined conditions that VRCFury can now convert. A side is kept when
   another state in the layer has no motion, so the layer stays convertible.
+- **Fade toggles and separate local toggles:** since VRCFury 1.1443.0 the clip list these
+  modules read is inherited from a shared base class instead of declared on its own
+  class, so both modules turned themselves off. They find it there now and install
+  again.
+- **Clip curve reading:** VRCFury 1.1459.0 gave its clip curve list an optional filter.
+  One-sided toggles, clip deduplication, DBT consolidation and the no-op curve strip
+  turned themselves off on that release. They now read every curve through the new
+  form, and still use the old form on earlier releases.
 - **SPS material probe cache:** VRCFury 1.1443.0 moved the DPS/TPS material probe from
   `TpsConfigurer` to `TpsUtils` with the same test. The cache now finds it there, and
   still finds it in `TpsConfigurer` on earlier releases.

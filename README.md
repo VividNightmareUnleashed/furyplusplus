@@ -80,7 +80,7 @@ VRCFury and the VRChat SDK are not updated. See the
    present, but the package should not stay installed.)
 3. Add the package through the Creator Companion or by hand. Both methods are described below.
 4. Check that the installed combination is approved in FuryPlusPlus settings. Once approved and reloaded, the Console should report
-   `[FuryPlusPlus] Ready: 29/29 modules installed for VRCFury 1.1454.0, 16 superseded`.
+   `[FuryPlusPlus] Ready: 29/29 modules installed for VRCFury 1.1463.0, 16 superseded`.
 
 ### Via the VRChat Creator Companion (recommended)
 
