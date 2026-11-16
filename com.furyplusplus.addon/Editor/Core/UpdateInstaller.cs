@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Threading;
 using Newtonsoft.Json.Linq;
 
 namespace FuryPlusPlus {
@@ -110,18 +111,50 @@ namespace FuryPlusPlus {
             }
             var moved = false;
             try {
-                Directory.Move(package, backup);
+                MoveDirectory(package, backup);
                 moved = true;
-                Directory.Move(staged, package);
-                if (vpmUpdate != null) File.Replace(pendingManifest, vpmPath, null);
+                MoveDirectory(staged, package);
+                if (vpmUpdate != null) ReplaceFile(pendingManifest, vpmPath);
                 return work;
             } catch {
                 if (moved) {
-                    if (Directory.Exists(package)) Directory.Move(package, Path.Combine(work, "failed-package"));
-                    Directory.Move(backup, package);
+                    if (Directory.Exists(package)) MoveDirectory(package, Path.Combine(work, "failed-package"));
+                    MoveDirectory(backup, package);
                 }
                 throw;
             }
+        }
+
+        // Antivirus scanners and indexers briefly open freshly written files, and Windows refuses
+        // to move a directory or replace a file while another process holds one open. Sharing
+        // failures are retried for about 1.5 s; a missing source or an existing destination
+        // fails at once.
+        private static readonly int[] RetryDelaysMs = { 25, 50, 100, 200, 400, 800 };
+
+        private static void MoveDirectory(string source, string destination) {
+            Retry(() => Directory.Move(source, destination),
+                () => Directory.Exists(source) && !Directory.Exists(destination) && !File.Exists(destination));
+        }
+
+        private static void ReplaceFile(string source, string destination) {
+            Retry(() => File.Replace(source, destination, null), () => File.Exists(source));
+        }
+
+        private static void Retry(Action action, Func<bool> retryable) {
+            for (var attempt = 0; ; attempt++) {
+                try {
+                    action();
+                    return;
+                } catch (Exception e) when (attempt < RetryDelaysMs.Length && IsSharingFailure(e) && retryable()) {
+                    Thread.Sleep(RetryDelaysMs[attempt]);
+                }
+            }
+        }
+
+        private static bool IsSharingFailure(Exception e) {
+            return e is UnauthorizedAccessException
+                || e is IOException && !(e is DirectoryNotFoundException || e is FileNotFoundException
+                    || e is PathTooLongException || e is DriveNotFoundException);
         }
 
         internal static JObject PrepareVpmUpdate(JObject manifest, string installedVersion, string newVersion) {

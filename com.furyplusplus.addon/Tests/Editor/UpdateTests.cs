@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Threading;
 using Newtonsoft.Json.Linq;
 using NUnit.Framework;
 
@@ -172,6 +173,44 @@ namespace FuryPlusPlus.Tests.Editor {
             }
             Assert.That(File.ReadAllText(manifestPath), Is.EqualTo(original));
             Assert.That(File.ReadAllText(Path.Combine(package, "obsolete.cs")), Is.EqualTo("old content"));
+        }
+
+        // Stands in for an antivirus scan: an open file blocks moving its directory on Windows.
+        private static FileStream HoldOpen(string path) {
+            return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        }
+
+        [Test]
+        public void InstallWaitsForABrieflyHeldFile() {
+            if (Path.DirectorySeparatorChar != '\\') Assert.Ignore("Requires Windows file sharing enforcement.");
+            var package = PreparePackage();
+            var zip = Archive();
+            var held = HoldOpen(Path.Combine(package, "obsolete.cs"));
+            var release = new Thread(() => {
+                Thread.Sleep(150);
+                held.Dispose();
+            });
+            release.Start();
+            try {
+                UpdateInstaller.Install(directory, package, "1.2.5", UpdateRelease.FindNewer(Listing(zip), "1.2.5"), zip);
+            } finally {
+                release.Join();
+            }
+            Assert.That(File.Exists(Path.Combine(package, "obsolete.cs")), Is.False);
+            Assert.That(File.Exists(Path.Combine(package, "Editor", "new.cs")), Is.True);
+        }
+
+        [Test]
+        public void InstallGivesUpOnAPersistentlyHeldFile() {
+            if (Path.DirectorySeparatorChar != '\\') Assert.Ignore("Requires Windows file sharing enforcement.");
+            var package = PreparePackage();
+            var zip = Archive();
+            using (HoldOpen(Path.Combine(package, "obsolete.cs"))) {
+                Assert.Throws<IOException>(() => UpdateInstaller.Install(directory, package, "1.2.5",
+                    UpdateRelease.FindNewer(Listing(zip), "1.2.5"), zip));
+            }
+            Assert.That(File.ReadAllText(Path.Combine(package, "obsolete.cs")), Is.EqualTo("old content"));
+            Assert.That(File.ReadAllText(Path.Combine(package, "package.json")), Does.Contain("1.2.5"));
         }
 
         [Test]
