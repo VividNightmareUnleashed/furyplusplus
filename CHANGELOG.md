@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.3.5 (2026-11-16)
+
+Makes in-editor updates more reliable on Windows. Validated with VRCFury 1.1470.0.
+
+- **Update installer:** antivirus scanners and search indexers briefly open newly written
+  files, and Windows refuses to move a folder or replace a file while another program has
+  one open. A scan at the wrong moment made an update fail with "access denied", and the
+  same failure while undoing a failed update could leave the project without the package.
+  The installer now retries these folder moves and the Creator Companion manifest update
+  for up to about 1.6 seconds, and still stops at once on any other error.
+
 ## 1.3.4 (2026-11-14)
 
 Restores full optimization coverage on VRCFury 1.1443.0 and later. VRCFury 1.1443.0
