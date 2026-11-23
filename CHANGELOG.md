@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.3.6 (2026-11-23)
+
+Restores full optimization coverage on VRCFury 1.1504.0. VRCFury rewrote its parameter
+compressor after 1.1470.0: it removed the legacy compression layer, sends each value
+through a new encoding that keeps custom bit widths and signedness, and changed the
+desktop sync file that mobile builds read.
+
+- **Compressor modules:** lane packing, the exhaustive solver, extra eligible parameters
+  and 4-bit float pairs turned themselves off on VRCFury 1.1504.0, because a setting they
+  read was removed with the legacy layer. They install again, and still read it on
+  earlier releases.
+- **4-bit float pairs:** VRCFury now writes one to three driver steps per compressed
+  value, depending on its encoding. The module finds the steps it replaces by parameter
+  name instead of by position. It pairs only floats with the standard 8-bit signed
+  encoding; floats with a custom bit width or an unsigned range, which VRCFury now also
+  compresses, keep VRCFury's own encoding.
+- **Desktop and mobile check:** mobile builds compare FuryPlusPlus settings with the
+  desktop upload. The check now reads VRCFury's new desktop sync file. The old reader
+  rejected that file as invalid, which would have stopped mobile builds.
+- **One-sided blendtree toggles:** the reported count includes only layers that VRCFury
+  converts. VRCFury 1.1504.0 builds both sides of a layer before it checks the
+  transitions, so layers it then skipped were counted too. Build output is unchanged.
+- **Parameter names:** VRCFury 1.1504.0 names its generated parameters
+  `VF_<hash>_<name>` instead of `VF<number>_<name>`. Wildcard patterns such as `VF*_Name`
+  in the precision, eligibility and keep lists still match. Patterns that spell out an
+  old number, such as `VF12_Name`, no longer do.
+
 ## 1.3.5 (2026-11-16)
 
 Makes in-editor updates more reliable on Windows. Validated with VRCFury 1.1470.0.
