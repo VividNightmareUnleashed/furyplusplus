@@ -48,7 +48,7 @@ namespace FuryPlusPlus {
         internal override void Install(Harmony harmony, VrcfuryCompat compat) {
             CompressorScope.EnsureInstalled(harmony);
             ReflectionUtils.Demand(CompressorCompat.SolverPrivateSolve,
-                "ParameterCompressorSolverService.GetParamsToOptimize(5 args)");
+                "ParameterCompressorSolverService.GetParamsToOptimize(4 or 5 args)");
             ReflectionUtils.Demand(CompressorCompat.SolverGetParamsUsedInMenu,
                 "ParameterCompressorSolverService.GetParamsUsedInMenu(types)");
             ReflectionUtils.Demand(CompressorCompat.DecisionOptimize, "OptimizationDecision.Optimize(int)");
@@ -58,10 +58,26 @@ namespace FuryPlusPlus {
                 throw new System.MissingMemberException(
                     "ParameterCompressorSolverService.GetParamsToOptimize(IEnumerable<Parameter>, ...)");
             }
+            // VRCFury up to 1.1470.0 passes a fifth useBadPriorityMethod flag.
+            var postfix = CompressorCompat.SolverPrivateSolve.GetParameters().Length == 5
+                ? nameof(LegacySolvePostfix)
+                : nameof(SolvePostfix);
             harmony.Patch(
                 CompressorCompat.SolverPrivateSolve,
-                postfix: new HarmonyMethod(typeof(CompressorEligibilityModule), nameof(SolvePostfix))
+                postfix: new HarmonyMethod(typeof(CompressorEligibilityModule), postfix)
             );
+        }
+
+        private static void LegacySolvePostfix(
+            object __instance,
+            object __result,
+            object __0,
+            object __2,
+            int __3,
+            bool __4    // useBadPriorityMethod
+        ) {
+            if (__4) return;
+            SolvePostfix(__instance, __result, __0, __2, __3);
         }
 
         private static void SolvePostfix(
@@ -69,10 +85,9 @@ namespace FuryPlusPlus {
             object __result,
             object __0, // IEnumerable<VRCExpressionParameters.Parameter> paramz (VRCFury 1.1437.0+)
             object __2, // ISet<string> addDriven
-            int __3,    // originalCost
-            bool __4    // useBadPriorityMethod
+            int __3     // originalCost
         ) {
-            if (!CompressorScope.RunActive || !CompressorScope.EligibilityActive || __4) return;
+            if (!CompressorScope.RunActive || !CompressorScope.EligibilityActive) return;
             try {
                 var compress = (IList<VRCExpressionParameters.Parameter>)
                     CompressorCompat.DecisionCompress.GetValue(__result);

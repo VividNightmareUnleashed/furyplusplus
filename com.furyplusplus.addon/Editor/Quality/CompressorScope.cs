@@ -155,7 +155,7 @@ namespace FuryPlusPlus {
         private static void BatchesPostfix(object __instance, object __result) {
             if (!RunActive || (!LanePackingActive && !Sub8Active)) return;
             try {
-                if ((bool)CompressorCompat.DecisionUseBadPriority.GetValue(__instance)) return;
+                if (CompressorCompat.UsesLegacyLayer(__instance)) return;
 
                 var numberBatches =
                     (List<List<VRCExpressionParameters.Parameter>>)CompressorCompat.BatchesItem1.GetValue(__result);
@@ -253,6 +253,10 @@ namespace FuryPlusPlus {
             var matching = compress
                 .Where(parameter => parameter != null
                                     && parameter.valueType == VRCExpressionParameters.ValueType.Float
+                                    // The 4-bit plateaus span the standard signed 8-bit range.
+                                    // VRCFury after 1.1470.0 also compresses custom-width and
+                                    // unsigned floats; those keep the stock path.
+                                    && ParameterEncoding.IsStandard(parameter)
                                     && !string.IsNullOrEmpty(parameter.name)
                                     && Sub8Globs.Any(glob => glob.IsMatch(parameter.name)))
                 .ToList();

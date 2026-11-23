@@ -162,10 +162,13 @@ namespace FuryPlusPlus {
             internal int BatchNum;
             internal VRCAvatarParameterDriver SendDriver;
             internal VRC_AvatarParameterDriver.Parameter SendEntry;
+            // Entries that encode rep into a scratch value just for SendEntry (VRCFury after
+            // 1.1470.0 sends batch-0 floats through a rounding scratch); empty otherwise.
+            internal List<VRC_AvatarParameterDriver.Parameter> SendPrelude;
             internal VRCAvatarParameterDriver ReceiveDriver;
-            internal VRC_AvatarParameterDriver.Parameter ReceiveEntry;
+            internal List<VRC_AvatarParameterDriver.Parameter> ReceiveChain;
             internal VRCAvatarParameterDriver UnlatchDriver;   // null when rep is in the last batch
-            internal VRC_AvatarParameterDriver.Parameter UnlatchEntry;
+            internal List<VRC_AvatarParameterDriver.Parameter> UnlatchChain;
             internal string SlotParamName;
             internal string PackedAap;
             internal string HiOutAap;
@@ -177,7 +180,7 @@ namespace FuryPlusPlus {
                 CompressorCompat.DecisionCompress.GetValue(decision);
             var pairs = CompressorScope.ComputeSub8Pairs(compress);
             if (pairs.Count == 0) return;
-            if ((bool)CompressorCompat.DecisionUseBadPriority.GetValue(decision)) return;
+            if (CompressorCompat.UsesLegacyLayer(decision)) return;
 
             // ---- gather everything first; throw (failing the build) before any mutation ----
 
@@ -188,14 +191,6 @@ namespace FuryPlusPlus {
                 CompressorCompat.BatchesItem2.GetValue(batchesObj);
             var batchCount = Math.Max(numberBatches.Count, boolBatches.Count);
             var indexBitCount = (int)CompressorCompat.DecisionGetIndexBitCount.Invoke(decision, null);
-
-            // Params synced by batches later than the first / earlier than the last get
-            // latch entries on the first send state / last receive state, in that order —
-            // needed to locate our copy entries positionally.
-            int CountIn(IEnumerable<List<VRCExpressionParameters.Parameter>> batches, Func<int, bool> which) {
-                return batches.Where((batch, num) => which(num)).Sum(batch => batch.Count);
-            }
-            var latchSendCount = CountIn(numberBatches, num => num != 0) + CountIn(boolBatches, num => num != 0);
 
             var compressorLayer = FindCompressorLayer(controller);
             var compressorMachine = ToggleTreeCompat.LayerStateMachine.GetValue(compressorLayer);
@@ -211,8 +206,7 @@ namespace FuryPlusPlus {
                     if (slotNum < 0) continue;
                     located = true;
                     plans.Add(BuildPlan(
-                        compressorMachine, rep, partner, batchNum, slotNum,
-                        numberBatches[batchNum].Count, batchCount, indexBitCount, latchSendCount));
+                        compressorMachine, rep, partner, batchNum, slotNum, batchCount, indexBitCount));
                 }
                 if (!located) {
                     throw new Exception(
@@ -234,11 +228,12 @@ namespace FuryPlusPlus {
                 // Send: same slot, packed AAP instead of the stock full-precision mapping.
                 plan.SendEntry.source = plan.PackedAap;
                 plan.SendEntry.convertRange = false;
+                RemoveEntries(plan.SendDriver, plan.SendPrelude);
 
                 // Receive: drop the stock copy; the interstitial state applies decoded values.
-                RemoveEntry(plan.ReceiveDriver, plan.ReceiveEntry);
+                RemoveEntries(plan.ReceiveDriver, plan.ReceiveChain);
                 if (plan.UnlatchDriver != null) {
-                    RemoveEntry(plan.UnlatchDriver, plan.UnlatchEntry);
+                    RemoveEntries(plan.UnlatchDriver, plan.UnlatchChain);
                 }
             }
 
@@ -278,69 +273,144 @@ namespace FuryPlusPlus {
             VRCExpressionParameters.Parameter partner,
             int batchNum,
             int slotNum,
-            int numbersInBatch,
             int batchCount,
-            int indexBitCount,
-            int latchSendCount
+            int indexBitCount
         ) {
             var titleId = TitleId(batchNum, indexBitCount);
             var sendState = FindState(machine, titleId, receive: false);
             var receiveState = FindState(machine, titleId, receive: true);
+            var where = $"'{rep.name}' (batch {batchNum}, slot {slotNum})";
 
             var sendDriver = SingleDriver(sendState);
-            var sendCopies = sendDriver.parameters
-                .Where(entry => entry.type == VRC_AvatarParameterDriver.ChangeType.Copy).ToList();
-            var sendSkip = batchNum == 0 ? latchSendCount : 0;
-            var sendEntry = sendCopies.ElementAtOrDefault(sendSkip + slotNum);
-            if (sendEntry == null || !sendEntry.name.Contains($"SyncDataNum{slotNum}")) {
-                throw new Exception($"FuryPlusPlus sub-8-bit packing: send copy for '{rep.name}' " +
-                                    $"(batch {batchNum}, slot {slotNum}) does not match the expected layout.");
-            }
-
             var receiveDriver = SingleDriver(receiveState);
-            var receiveCopies = receiveDriver.parameters
-                .Where(entry => entry.type == VRC_AvatarParameterDriver.ChangeType.Copy).ToList();
-            var receiveEntry = receiveCopies.ElementAtOrDefault(slotNum);
-            if (receiveEntry == null || !receiveEntry.source.Contains($"SyncDataNum{slotNum}")) {
-                throw new Exception($"FuryPlusPlus sub-8-bit packing: receive copy for '{rep.name}' " +
-                                    $"(batch {batchNum}, slot {slotNum}) does not match the expected layout.");
+            var plan = LocateEntries(sendDriver, receiveDriver, rep.name, slotNum,
+                batchNum == 0, batchNum == batchCount - 1, where);
+            plan.Rep = rep;
+            plan.Partner = partner;
+            plan.BatchNum = batchNum;
+            if (plan.UnlatchChain != null) {
+                // The receive wrote into a latch param; the last batch's receive state
+                // decodes latch -> original. That must go too, or it would overwrite our
+                // decoded value with the (never-written) latch default at cycle end.
+                var unlatchState = FindState(machine, TitleId(batchCount - 1, indexBitCount), receive: true);
+                plan.UnlatchDriver = SingleDriver(unlatchState);
+                plan.UnlatchChain = CopyChain(plan.UnlatchDriver, plan.ReceiveChain[0].name, rep.name,
+                    $"unlatch of {where}");
+            }
+            return plan;
+        }
+
+        /**
+         * Finds the stock driver entries for one compressed float, by name rather than by
+         * position: VRCFury after 1.1470.0 writes one to three entries per parameter
+         * depending on its network encoding. UnlatchChain comes back as an empty marker list
+         * when the value goes through a latch; the caller resolves it on the final state.
+         */
+        private static PairPlan LocateEntries(
+            VRCAvatarParameterDriver sendDriver,
+            VRCAvatarParameterDriver receiveDriver,
+            string repName,
+            int slotNum,
+            bool firstBatch,
+            bool lastBatch,
+            string where
+        ) {
+            var sendEntry = SingleCopy(sendDriver, entry => IsNumberSlot(entry.name, slotNum),
+                $"send copy into the slot for {where}");
+            var slotName = sendEntry.name;
+            var sendPrelude = new List<VRC_AvatarParameterDriver.Parameter>();
+            if (sendEntry.source != repName) {
+                // Batch 0 of newer releases: rep -> rounding scratch -> slot. Later batches
+                // send a latch that the first send state filled; that latch stays as it is.
+                var index = sendDriver.parameters.IndexOf(sendEntry);
+                var previous = index > 0 ? sendDriver.parameters[index - 1] : null;
+                if (previous != null && previous.type == VRC_AvatarParameterDriver.ChangeType.Copy
+                    && previous.source == repName && previous.name == sendEntry.source) {
+                    sendPrelude.Add(previous);
+                } else if (firstBatch) {
+                    throw new Exception($"FuryPlusPlus sub-8-bit packing: send copy for {where} " +
+                                        "does not match the expected layout.");
+                }
             }
 
             var plan = new PairPlan {
-                Rep = rep,
-                Partner = partner,
-                BatchNum = batchNum,
                 SendDriver = sendDriver,
                 SendEntry = sendEntry,
+                SendPrelude = sendPrelude,
                 ReceiveDriver = receiveDriver,
-                ReceiveEntry = receiveEntry,
-                SlotParamName = receiveEntry.source
+                SlotParamName = slotName
             };
-
-            var unlatchNow = batchNum == batchCount - 1;
-            if (unlatchNow) {
-                if (receiveEntry.name != rep.name) {
-                    throw new Exception($"FuryPlusPlus sub-8-bit packing: expected final-batch receive of " +
-                                        $"'{rep.name}' to unlatch directly, found '{receiveEntry.name}'.");
-                }
+            if (lastBatch) {
+                plan.ReceiveChain = CopyChain(receiveDriver, slotName, repName,
+                    $"final-batch receive of {where}");
             } else {
-                // The receive wrote into a latch param; the last batch's receive state
-                // copies latch → original. That copy must go too, or it would overwrite
-                // our decoded value with the (never-written) latch default at cycle end.
-                var latchName = receiveEntry.name;
-                var unlatchState = FindState(machine, TitleId(batchCount - 1, indexBitCount), receive: true);
-                var unlatchDriver = SingleDriver(unlatchState);
-                var unlatchEntry = unlatchDriver.parameters.FirstOrDefault(entry =>
-                    entry.type == VRC_AvatarParameterDriver.ChangeType.Copy
-                    && entry.source == latchName && entry.name == rep.name);
-                if (unlatchEntry == null) {
-                    throw new Exception($"FuryPlusPlus sub-8-bit packing: unlatch copy for '{rep.name}' " +
-                                        "not found on the final receive state.");
-                }
-                plan.UnlatchDriver = unlatchDriver;
-                plan.UnlatchEntry = unlatchEntry;
+                var receiveEntry = SingleCopy(receiveDriver, entry => entry.source == slotName,
+                    $"receive copy for {where}");
+                plan.ReceiveChain = new List<VRC_AvatarParameterDriver.Parameter> { receiveEntry };
+                plan.UnlatchChain = new List<VRC_AvatarParameterDriver.Parameter>();
             }
             return plan;
+        }
+
+        /** Test entry point for the entry lookup on a single batch that both sends and unlatches. */
+        internal static (VRC_AvatarParameterDriver.Parameter Send,
+            List<VRC_AvatarParameterDriver.Parameter> SendPrelude,
+            List<VRC_AvatarParameterDriver.Parameter> Receive) LocateForTest(
+            VRCAvatarParameterDriver sendDriver,
+            VRCAvatarParameterDriver receiveDriver,
+            string repName,
+            int slotNum
+        ) {
+            var plan = LocateEntries(sendDriver, receiveDriver, repName, slotNum, true, true, repName);
+            return (plan.SendEntry, plan.SendPrelude, plan.ReceiveChain);
+        }
+
+        /** VRCFury's int slot names end in SyncDataNum{n} (VF{feature}_ or VF_{hash}_ prefixed). */
+        internal static bool IsNumberSlot(string name, int slotNum) {
+            return name != null && Regex.IsMatch(name, $"(^|_)SyncDataNum{slotNum}$");
+        }
+
+        private static VRC_AvatarParameterDriver.Parameter SingleCopy(
+            VRCAvatarParameterDriver driver,
+            Func<VRC_AvatarParameterDriver.Parameter, bool> match,
+            string what
+        ) {
+            var found = driver.parameters
+                .Where(entry => entry.type == VRC_AvatarParameterDriver.ChangeType.Copy && match(entry))
+                .ToList();
+            if (found.Count != 1) {
+                throw new Exception($"FuryPlusPlus sub-8-bit packing: expected one {what}, found {found.Count}.");
+            }
+            return found[0];
+        }
+
+        /**
+         * The consecutive copy entries that carry one value from `source` to `destination`:
+         * a single copy, or VRCFury's decode, re-encode and decode chain through shared
+         * scratch values when the local declaration differs from the desktop wire format.
+         */
+        internal static List<VRC_AvatarParameterDriver.Parameter> CopyChain(
+            VRCAvatarParameterDriver driver,
+            string source,
+            string destination,
+            string what
+        ) {
+            var first = SingleCopy(driver, entry => entry.source == source, what);
+            var entries = driver.parameters;
+            var chain = new List<VRC_AvatarParameterDriver.Parameter> { first };
+            var index = entries.IndexOf(first);
+            while (chain[chain.Count - 1].name != destination) {
+                index++;
+                var next = index < entries.Count ? entries[index] : null;
+                if (next == null || chain.Count >= 3
+                    || next.type != VRC_AvatarParameterDriver.ChangeType.Copy
+                    || next.source != chain[chain.Count - 1].name) {
+                    throw new Exception($"FuryPlusPlus sub-8-bit packing: {what} does not end in " +
+                                        $"'{destination}' as expected.");
+                }
+                chain.Add(next);
+            }
+            return chain;
         }
 
         // ---- compressor layer surgery helpers ----
@@ -405,8 +475,12 @@ namespace FuryPlusPlus {
             return drivers[0];
         }
 
-        private static void RemoveEntry(VRCAvatarParameterDriver driver, VRC_AvatarParameterDriver.Parameter entry) {
-            driver.parameters = driver.parameters.Where(existing => existing != entry).ToList();
+        private static void RemoveEntries(
+            VRCAvatarParameterDriver driver,
+            ICollection<VRC_AvatarParameterDriver.Parameter> remove
+        ) {
+            if (remove.Count == 0) return;
+            driver.parameters = driver.parameters.Where(existing => !remove.Contains(existing)).ToList();
         }
 
         /**

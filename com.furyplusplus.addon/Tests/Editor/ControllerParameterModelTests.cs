@@ -42,17 +42,18 @@ namespace FuryPlusPlus.Tests.Editor {
         /** VFAvatarController around an empty controller; One()/Always() need no services. */
         private static object NewAvatarController() {
             var avatarControllerType = ReflectionUtils.FindType("VF.Utils.VFAvatarController");
+            // VRCFury after 1.1470.0 dropped the clip-prefix provider (7 -> 6 parameters).
             var constructor = avatarControllerType.GetConstructors(Any)
-                .Single(ctor => ctor.GetParameters().Length == 7);
-            return constructor.Invoke(new object[] {
-                NewController(),
-                VRCAvatarDescriptor.AnimLayerType.FX,
-                (Func<int>)(() => 7),
-                (Func<string>)(() => ""),
-                (Func<string, string>)(name => "VF7_" + name),
-                null,
-                null
-            });
+                .Single(ctor => ctor.GetParameters().Any(p => p.ParameterType == typeof(Func<string, string>)));
+            return constructor.Invoke(constructor.GetParameters().Select(parameter => {
+                var type = parameter.ParameterType;
+                if (type == typeof(VRCAvatarDescriptor.AnimLayerType)) return VRCAvatarDescriptor.AnimLayerType.FX;
+                if (type == typeof(Func<int>)) return (Func<int>)(() => 7);
+                if (type == typeof(Func<string>)) return (Func<string>)(() => "");
+                if (type == typeof(Func<string, string>)) return (Func<string, string>)(name => "VF7_" + name);
+                if (type.IsInstanceOfType(NewController())) return NewController();
+                return (object)null;
+            }).ToArray());
         }
 
         [Test]

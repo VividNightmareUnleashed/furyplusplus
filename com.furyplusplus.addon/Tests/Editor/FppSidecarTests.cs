@@ -30,6 +30,9 @@ namespace FuryPlusPlus.Tests.Editor {
         [TestCase("{ \"parameters\" : [ { \"compressed\" : true } ] }", true)]
         [TestCase("{\"parameters\":[{\"compressed\":false}]}", false)]
         [TestCase("{\"parameters\":[]}", false)]
+        // VRCFury after 1.1470.0: plain declarations plus a top-level list of compressed names.
+        [TestCase("{\"parameters\":[{\"name\":\"A\",\"valueType\":2}],\"compressed\":[\"A\"],\"saveVersion\":12}", true)]
+        [TestCase("{\"parameters\":[{\"name\":\"A\",\"valueType\":2}],\"compressed\":[],\"saveVersion\":13}", false)]
         public void VrcfuryCompressionParserUsesStructuredJson(string json, bool expected) {
             Assert.That(FppSidecar.TryParseVrcfuryCompression(json, out var compressed), Is.True);
             Assert.That(compressed, Is.EqualTo(expected));
@@ -42,6 +45,10 @@ namespace FuryPlusPlus.Tests.Editor {
         [TestCase("{\"parameters\":[{\"compressed\":\"false\"}]}")]
         [TestCase("{\"parameters\":[{\"compressed\":true,\"compressed\":false}]}")]
         [TestCase("not json")]
+        [TestCase("{\"compressed\":[\"A\"]}")]
+        [TestCase("{\"parameters\":[],\"compressed\":null}")]
+        [TestCase("{\"parameters\":[],\"compressed\":[1]}")]
+        [TestCase("{\"parameters\":[],\"compressed\":[\"\"]}")]
         public void VrcfuryCompressionParserRejectsUncertainData(string json) {
             Assert.That(FppSidecar.TryParseVrcfuryCompression(json, out _), Is.False);
         }

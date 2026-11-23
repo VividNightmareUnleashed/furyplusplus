@@ -205,6 +205,16 @@ namespace FuryPlusPlus {
             if (string.IsNullOrWhiteSpace(json)) return false;
             try {
                 var data = JObject.Parse(json, new JsonLoadSettings { DuplicatePropertyNameHandling = DuplicatePropertyNameHandling.Error });
+                // VRCFury after 1.1470.0 lists the compressed parameter names at the top level
+                // and stores plain parameter declarations in `parameters`.
+                if (data.TryGetValue("compressed", out var compressedNames)) {
+                    if (!(compressedNames is JArray names) || !(data["parameters"] is JArray)) return false;
+                    foreach (var name in names) {
+                        if (name.Type != JTokenType.String || string.IsNullOrEmpty((string)name)) return false;
+                    }
+                    compressed = names.Count > 0;
+                    return true;
+                }
                 if (!(data["parameters"] is JArray parameters)) return false;
                 foreach (var parameter in parameters) {
                     if (!(parameter is JObject entry) || entry["compressed"]?.Type != JTokenType.Boolean) return false;

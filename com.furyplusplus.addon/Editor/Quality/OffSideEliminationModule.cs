@@ -199,6 +199,13 @@ namespace FuryPlusPlus {
         }
 
         private static Exception OptimizeLayerFinalizer(Exception __exception) {
+            // Count only layers that converted: VRCFury after 1.1470.0 builds the sides
+            // before checking the transition conditions, which can still abort the layer.
+            if (droppedSideInLayer && __exception == null) {
+                upgraded++;
+                LastUpgraded = upgraded;
+                LastStats = $"candidateLayers={layersSeen} offSidesChecked={considered} oneSided={upgraded}";
+            }
             currentLayer = null;
             layersByBinding = null;
             droppedSideInLayer = false;
@@ -229,9 +236,6 @@ namespace FuryPlusPlus {
 
                 __result = null;
                 droppedSideInLayer = true;
-                upgraded++;
-                LastUpgraded = upgraded;
-                LastStats = $"candidateLayers={layersSeen} offSidesChecked={considered} oneSided={upgraded}";
             } catch {
                 // Leave the motion untouched; stock two-sided conversion proceeds.
             }

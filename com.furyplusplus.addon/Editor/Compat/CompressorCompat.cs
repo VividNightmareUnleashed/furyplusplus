@@ -14,6 +14,7 @@ namespace FuryPlusPlus {
         internal static Type DecisionType;                    // OptimizationDecision
         internal static FieldInfo DecisionNumberSlots;
         internal static FieldInfo DecisionBoolSlots;
+        // Removed after VRCFury 1.1470.0 with the legacy compressor layer; null there.
         internal static FieldInfo DecisionUseBadPriority;
         internal static FieldInfo DecisionCompress;           // IList<VRCExpressionParameters.Parameter>
         internal static MethodInfo DecisionGetBatches;        // () → (List<List<P>>, List<List<P>>)
@@ -26,7 +27,9 @@ namespace FuryPlusPlus {
 
         internal static Type SolverType;                      // ParameterCompressorSolverService
         internal static MethodInfo SolverPublicSolve;         // GetParamsToOptimize()
-        internal static MethodInfo SolverPrivateSolve;        // GetParamsToOptimize(paramz, types, addDriven, cost, bad)
+        // GetParamsToOptimize(paramz, types, addDriven, cost[, bad]): VRCFury after 1.1470.0
+        // dropped the trailing useBadPriorityMethod flag with the legacy compressor layer.
+        internal static MethodInfo SolverPrivateSolve;
         internal static MethodInfo SolverGetParamsUsedInMenu; // (ISet<ControlType>) → ISet<string>
         // VRCFury 1.1435.0+: parameters whose bit width or signedness the compressor can't keep.
         // Absent on older releases, which compress every eligible parameter.
@@ -105,7 +108,7 @@ namespace FuryPlusPlus {
                 SolverPublicSolve = ReflectionUtils.FindUniqueMethod(SolverType, "GetParamsToOptimize",
                     method => method.GetParameters().Length == 0);
                 SolverPrivateSolve = ReflectionUtils.FindUniqueMethod(SolverType, "GetParamsToOptimize",
-                    method => method.GetParameters().Length == 5);
+                    method => method.GetParameters().Length == 4 || method.GetParameters().Length == 5);
                 SolverGetParamsUsedInMenu = ReflectionUtils.FindUniqueMethod(SolverType, "GetParamsUsedInMenu",
                     method => method.GetParameters().Length == 1);
                 SolverExpressionParams = SolverType.GetField("expressionParams", any);
@@ -219,7 +222,6 @@ namespace FuryPlusPlus {
             ReflectionUtils.Demand(DecisionType, "VF.Service.Compressor.OptimizationDecision");
             ReflectionUtils.Demand(DecisionNumberSlots, "OptimizationDecision.numberSlots");
             ReflectionUtils.Demand(DecisionBoolSlots, "OptimizationDecision.boolSlots");
-            ReflectionUtils.Demand(DecisionUseBadPriority, "OptimizationDecision.useBadPriorityMethod");
             ReflectionUtils.Demand(DecisionCompress, "OptimizationDecision.compress");
             ReflectionUtils.Demand(DecisionGetBatches, "OptimizationDecision.GetBatches()");
             ReflectionUtils.Demand(DecisionGetBatchCount, "OptimizationDecision.GetBatchCount()");
@@ -228,6 +230,18 @@ namespace FuryPlusPlus {
             ReflectionUtils.Demand(BatchesItem1, "GetBatches return tuple Item1");
             ReflectionUtils.Demand(BatchesItem2, "GetBatches return tuple Item2");
             ReflectionUtils.Demand(CompressorApply, "ParameterCompressorService.Apply()");
+        }
+
+        /** Whether the decision opted into VRCFury's legacy layer; always false once it was removed. */
+        internal static bool UsesLegacyLayer(object decision) {
+            return DecisionUseBadPriority != null && (bool)DecisionUseBadPriority.GetValue(decision);
+        }
+
+        /** Arguments for the private solve, with the legacy flag off where the release still takes it. */
+        internal static object[] PrivateSolveArgs(object paramz, object allowedTypes, object addDriven, int originalCost) {
+            return SolverPrivateSolve.GetParameters().Length == 5
+                ? new[] { paramz, allowedTypes, addDriven, originalCost, (object)false }
+                : new[] { paramz, allowedTypes, addDriven, (object)originalCost };
         }
 
         /** Stock's encoding check, or true on VRCFury releases without one. */

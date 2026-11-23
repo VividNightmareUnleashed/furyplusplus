@@ -69,7 +69,7 @@ namespace FuryPlusPlus {
             ReflectionUtils.Demand(CompressorCompat.SolverPublicSolve,
                 "ParameterCompressorSolverService.GetParamsToOptimize()");
             ReflectionUtils.Demand(CompressorCompat.SolverPrivateSolve,
-                "ParameterCompressorSolverService.GetParamsToOptimize(5 args)");
+                "ParameterCompressorSolverService.GetParamsToOptimize(4 or 5 args)");
             ReflectionUtils.Demand(CompressorCompat.SolverExpressionParams,
                 "ParameterCompressorSolverService.expressionParams");
             ReflectionUtils.Demand(CompressorCompat.SolverControllers,
@@ -159,7 +159,7 @@ namespace FuryPlusPlus {
             for (var setIndex = 0; setIndex < OptionSets.Length; setIndex++) {
                 var allowed = new HashSet<VRCExpressionsMenu.Control.ControlType>(OptionSets[setIndex]);
                 var decision = ReflectionUtils.InvokeUnwrapped(CompressorCompat.SolverPrivateSolve, solver,
-                    new object[] { paramz, allowed, addDriven, originalCost, false });
+                    CompressorCompat.PrivateSolveArgs(paramz, allowed, addDriven, originalCost));
                 var compress = (IList<VRCExpressionParameters.Parameter>)
                     CompressorCompat.DecisionCompress.GetValue(decision);
                 if (compress.Count == 0) continue;

@@ -18,6 +18,25 @@ namespace FuryPlusPlus.Tests.Editor {
             }
         }
 
+        /**
+         * Every module the loaded VRCFury release is approved for has to install. A failure
+         * here is a reflection or Harmony binding that no longer fits that release.
+         */
+        [Test]
+        public void NoEligibleModuleFailsToInstall() {
+            var statuses = ModuleRegistry.All
+                .Select(module => (module.Id, Status: ModuleRegistry.GetStatus(module)))
+                .ToList();
+            if (statuses.All(entry => entry.Status.State != ModuleState.Installed)) {
+                Assert.Ignore("No module installed in this domain (VRCFury absent or bootstrap skipped).");
+            }
+            var failed = statuses
+                .Where(entry => entry.Status.State == ModuleState.Failed)
+                .Select(entry => $"{entry.Id}: {entry.Status.Message}")
+                .ToList();
+            Assert.That(failed, Is.Empty);
+        }
+
         [Test]
         public void ModuleDisplayNamesAreSet() {
             foreach (var module in ModuleRegistry.All) {

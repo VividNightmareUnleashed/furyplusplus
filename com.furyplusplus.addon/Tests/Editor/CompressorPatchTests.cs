@@ -207,5 +207,120 @@ namespace FuryPlusPlus.Tests.Editor {
             Assert.AreEqual(11, Sub8Surgery.QuantizeIndex(0.5f));
             Assert.AreEqual(8, Sub8Surgery.QuantizeIndex(0.0667f));
         }
+
+        // ---- sub-8 driver entry lookup (VRCFury 1.1470.0 and the later encoding layout) ----
+
+        private static VRC.SDKBase.VRC_AvatarParameterDriver.Parameter Copy(string source, string name) {
+            return new VRC.SDKBase.VRC_AvatarParameterDriver.Parameter {
+                type = VRC.SDKBase.VRC_AvatarParameterDriver.ChangeType.Copy, source = source, name = name
+            };
+        }
+
+        private static VRC.SDK3.Avatars.Components.VRCAvatarParameterDriver Driver(
+            params VRC.SDKBase.VRC_AvatarParameterDriver.Parameter[] entries
+        ) {
+            var driver = UnityEngine.ScriptableObject.CreateInstance<VRC.SDK3.Avatars.Components.VRCAvatarParameterDriver>();
+            driver.parameters = entries.ToList();
+            return driver;
+        }
+
+        [TestCase("VF7_SyncDataNum1", 1, true)]
+        [TestCase("VF_Ab3dE9xZ_SyncDataNum1", 1, true)]
+        [TestCase("SyncDataNum1", 1, true)]
+        [TestCase("VF_Ab3dE9xZ_SyncDataNum10", 1, false)]
+        [TestCase("VF_Ab3dE9xZ_SyncDataNum1", 0, false)]
+        [TestCase("VF_Ab3dE9xZ_MySyncDataNum1", 1, false)]
+        public void Sub8RecognizesNumberSlotNames(string name, int slot, bool expected) {
+            Assert.AreEqual(expected, Sub8Surgery.IsNumberSlot(name, slot));
+        }
+
+        [Test]
+        public void Sub8FindsLegacyLayoutEntriesByName() {
+            // VRCFury 1.1470.0: latch entries first, then one copy per slot; one receive copy.
+            var send = Driver(
+                Copy("Late", "VF7_Late"),
+                Copy("Other", "VF7_SyncDataNum0"),
+                Copy("Rep", "VF7_SyncDataNum1"));
+            var receive = Driver(
+                Copy("VF7_SyncDataNum0", "Other"),
+                Copy("VF7_SyncDataNum1", "Rep"));
+
+            var (sendEntry, prelude, chain) = Sub8Surgery.LocateForTest(send, receive, "Rep", 1);
+
+            Assert.AreSame(send.parameters[2], sendEntry);
+            Assert.IsEmpty(prelude);
+            CollectionAssert.AreEqual(new[] { receive.parameters[1] }, chain);
+        }
+
+        [Test]
+        public void Sub8FindsScratchEncodedFloatSendAndRemovesOnlyItsOwnPrelude() {
+            // Later releases round batch-0 floats through one shared scratch value.
+            const string scratch = "VF_buildHsh_Compressor Value";
+            var send = Driver(
+                Copy("Late", scratch),
+                Copy(scratch, "VF_buildHsh_Late/Latched"),
+                Copy("Other", scratch),
+                Copy(scratch, "VF_avatarHs_SyncDataNum0"),
+                Copy("Rep", scratch),
+                Copy(scratch, "VF_avatarHs_SyncDataNum1"),
+                Copy("Unrelated", "VF_avatarHs_SyncDataNum10"));
+            var receive = Driver(
+                Copy("VF_avatarHs_SyncDataNum0", "Other"),
+                Copy("VF_avatarHs_SyncDataNum1", "Rep"),
+                Copy("VF_avatarHs_SyncDataNum10", "Unrelated"));
+
+            var (sendEntry, prelude, chain) = Sub8Surgery.LocateForTest(send, receive, "Rep", 1);
+
+            Assert.AreSame(send.parameters[5], sendEntry);
+            CollectionAssert.AreEqual(new[] { send.parameters[4] }, prelude);
+            CollectionAssert.AreEqual(new[] { receive.parameters[1] }, chain);
+        }
+
+        [Test]
+        public void Sub8FollowsAMobileReencodeChainToTheOriginal() {
+            // Mobile, where the local declaration differs from the desktop wire format.
+            const string scratch = "VF_buildHsh_Compressor Value";
+            const string code = "VF_buildHsh_Compressor Code";
+            var send = Driver(Copy("Rep", scratch), Copy(scratch, "VF_avatarHs_SyncDataNum0"));
+            var receive = Driver(
+                Copy("VF_avatarHs_SyncDataNum0", scratch),
+                Copy(scratch, code),
+                Copy(code, "Rep"),
+                Copy("VF_avatarHs_SyncDataBool0", "Flag"));
+
+            var (_, _, chain) = Sub8Surgery.LocateForTest(send, receive, "Rep", 0);
+
+            CollectionAssert.AreEqual(receive.parameters.Take(3), chain);
+        }
+
+        [Test]
+        public void Sub8RejectsABrokenReceiveChain() {
+            var send = Driver(Copy("Rep", "VF_avatarHs_SyncDataNum0"));
+            var receive = Driver(
+                Copy("VF_avatarHs_SyncDataNum0", "VF_buildHsh_Compressor Value"),
+                Copy("Something else", "Rep"));
+
+            Assert.Throws<Exception>(() => Sub8Surgery.LocateForTest(send, receive, "Rep", 0));
+        }
+
+#if VRCSDK_HAS_DYNAMIC_PARAMETER_BIT_WIDTH
+        [Test]
+        public void Sub8PairsOnlyStandardFloats() {
+            CompressorScope.Sub8Active = true;
+            CompressorScope.Sub8Globs = Globs.Parse("pack/*");
+            var standardA = new VRCExpressionParameters.Parameter { name = "pack/a", valueType = VRCExpressionParameters.ValueType.Float };
+            var narrow = new VRCExpressionParameters.Parameter { name = "pack/narrow", valueType = VRCExpressionParameters.ValueType.Float, bitWidth = 5 };
+            var unsigned = new VRCExpressionParameters.Parameter { name = "pack/unsigned", valueType = VRCExpressionParameters.ValueType.Float, flippedRepresentation = true };
+            var standardB = new VRCExpressionParameters.Parameter { name = "pack/b", valueType = VRCExpressionParameters.ValueType.Float };
+
+            var pairs = CompressorScope.ComputeSub8Pairs(new List<VRCExpressionParameters.Parameter> {
+                standardA, narrow, unsigned, standardB
+            });
+
+            Assert.AreEqual(1, pairs.Count);
+            Assert.AreSame(standardA, pairs[0].Rep);
+            Assert.AreSame(standardB, pairs[0].Partner);
+        }
+#endif
     }
 }
