@@ -5,7 +5,7 @@
 Restores full optimization coverage on VRCFury 1.1504.0. VRCFury rewrote its parameter
 compressor after 1.1470.0: it removed the legacy compression layer, sends each value
 through a new encoding that keeps custom bit widths and signedness, and changed the
-desktop sync file that mobile builds read.
+desktop sync file that mobile builds read. Validated with VRCFury 1.1504.0.
 
 - **Compressor modules:** lane packing, the exhaustive solver, extra eligible parameters
   and 4-bit float pairs turned themselves off on VRCFury 1.1504.0, because a setting they
